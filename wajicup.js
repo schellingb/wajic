@@ -461,7 +461,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 	const memory_pages = Math.max(import_memory_pages, export_memory_pages);
 
 	var imports = GenerateJsImports(mods, libs);
-	const [has_main, has_WajicMain, has_malloc, use_sbrk, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP]
+	const [use_sbrk, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP]
 		= VerifyWasmLayout(exports, mods, imports, use_memory, p);
 
 	// Fix up some special cases in the generated imports code
@@ -642,7 +642,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 		body += '	// Call global constructors' + "\n";
 		body += '	ASM.__wasm_call_ctors();' + "\n\n";
 	}
-	if (has_main && has_malloc)
+	if ((exports.main || exports.__main_argc_argv) && exports.malloc)
 	{
 		body += '	// Allocate 10 bytes of memory to store the argument list with 1 entry to pass to main' + "\n";
 		body += '	var ptr = ASM.malloc(10);' + "\n\n";
@@ -655,14 +655,19 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 		body += '	MU32[(ptr    )>>2] = (ptr + 8)' + "\n";
 		body += '	MU32[(ptr + 4)>>2] = 0;' + "\n\n";
 
-		body += '	ASM.main(1, ptr);' + "\n\n";
+		if (exports.main) body += '	ASM.main(1, ptr);' + "\n";
+		if (exports.__main_argc_argv) body += '	ASM.__main_argc_argv(1, ptr);' + "\n";
+		body += "\n";
 	}
-	if (has_main && !has_malloc)
+	if (((exports.main || exports.__main_argc_argv) && !exports.malloc) || exports.__original_main || exports.__main_void)
 	{
 		body += '	// Call the main function with zero arguments' + "\n";
-		body += '	ASM.main(0, 0);' + "\n\n";
+		if (exports.main && !exports.malloc) body += '	ASM.main(0, 0);' + "\n\n";
+		if (exports.__main_argc_argv && !exports.malloc) body += '	ASM.__main_argc_argv(0, 0);' + "\n\n";
+		if (exports.__original_main) body += '	ASM.__original_main();' + "\n";
+		if (exports.__main_void) body += '	ASM.__main_void();' + "\n";
 	}
-	if (has_WajicMain)
+	if (exports.WajicMain)
 	{
 		body += '	// Call the WajicMain function' + "\n";
 		body += '	ASM.WajicMain();' + "\n\n";
@@ -923,7 +928,8 @@ function GenerateWasm(p)
 
 function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 {
-	var has_main = !!exports.main;
+	var has_main_with_args = !!exports.main || !!exports.__main_argc_argv;
+	var has_main_no_args = !!exports.__original_main || !!exports.__main_void;
 	var has_WajicMain = !!exports.WajicMain;
 	var has_malloc = !!exports.malloc;
 	var has_free = !!exports.free;
@@ -935,9 +941,9 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 	var use_MArrPut = imports.match(/\bMArrPut\b/);
 	var use_WM = imports.match(/\bWM\b/);
 	var use_ASM = imports.match(/\bASM\b/) || use_MStrPut || use_MArrPut;
-	var use_MU8 = imports.match(/\bMU8\b/) || use_MStrPut || use_MStrGet || use_MArrPut || (has_main && has_malloc);
+	var use_MU8 = imports.match(/\bMU8\b/) || use_MStrPut || use_MStrGet || use_MArrPut || (has_main_with_args && has_malloc);
 	var use_MU16 = imports.match(/\bMU16\b/);
-	var use_MU32 = imports.match(/\bMU32\b/) || (has_main && has_malloc) || use_wasi;
+	var use_MU32 = imports.match(/\bMU32\b/) || (has_main_with_args && has_malloc) || use_wasi;
 	var use_MI32 = imports.match(/\bMI32\b/);
 	var use_MF32 = imports.match(/\bMF32\b/);
 	var use_MSetViews = use_MU8 || use_MU16 || use_MU32 || use_MI32 || use_MF32;
@@ -946,7 +952,7 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 	var use_malloc = imports.match(/\bASM.malloc\b/i) || use_MArrPut || use_MStrAlloc;
 	var use_free = imports.match(/\bASM.free\b/i);
 
-	VERBOSE('    [JS] Uses: ' + ([ use_memory?'Memory':0, use_sbrk?'sbrk':0, has_main?'main':0, has_WajicMain?'WajicMain':0, use_wasi?'wasi':0 ].filter(m=>m).join('|')));
+	VERBOSE('    [JS] Uses: ' + ([ use_memory?'Memory':0, use_sbrk?'sbrk':0, (has_main_with_args||has_main_no_args)?'main':0, has_WajicMain?'WajicMain':0, use_wasi?'wasi':0 ].filter(m=>m).join('|')));
 	if (!use_memory && use_MEM)       ABORT('WASM module does not import or export memory object but requires memory manipulation');
 	if (!has_malloc && use_MArrPut)   ABORT('WASM module does not export malloc but its usage of MArrPut requires it');
 	if (!has_malloc && use_MStrAlloc) ABORT('WASM module does not export malloc but its usage of MStrPut requires it');
@@ -966,7 +972,7 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 		if (unused_free)   WARN('WASM module exports free but does not use it, it should be compiled without the export');
 	}
 
-	return [has_main, has_WajicMain, has_malloc, use_sbrk, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP]
+	return [use_sbrk, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP];
 }
 
 function MinifyJs(jsBytes, p)
@@ -1515,7 +1521,7 @@ function ExperimentalCompileWasm(p, wasmPath, cfiles, ccAdd, ldAdd, pathToWajic,
 	ccArgs = ccArgs.concat(ccAdd.trim().split(/\s+/));
 
 	var ldArgs = (wantDebug ? [] : ['-strip-all']);
-	ldArgs.push('-gc-sections', '-no-entry', '-allow-undefined', '-export=__wasm_call_ctors', '-export=main', '-export=malloc', '-export=free', pathToSystem+'system.bc');
+	ldArgs.push('-gc-sections', '-no-entry', '-allow-undefined', '-export=__wasm_call_ctors', '-export=main', '-export=__original_main', '-export=__main_argc_argv', '-export=__main_void', '-export=malloc', '-export=free', pathToSystem+'system.bc');
 	ldArgs = ldArgs.concat(ldAdd.trim().split(/\s+/));
 
 	var procs = [];

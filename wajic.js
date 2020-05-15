@@ -218,7 +218,7 @@ if (!load)
 	// Store the list of the functions exported by the wasm module in WA.asm
 	WA.asm = ASM = instance.exports;
 
-	var memory = ASM.memory, wasm_call_ctors = ASM.__wasm_call_ctors, main = ASM.main, malloc = ASM.malloc, WajicMain = ASM.WajicMain, started = WA.started;
+	var memory = ASM.memory, wasm_call_ctors = ASM.__wasm_call_ctors, main = ASM.main || ASM.__main_argc_argv, mainvoid = ASM.__original_main || ASM.__main_void, malloc = ASM.malloc, WajicMain = ASM.WajicMain, started = WA.started;
 
 	if (memory)
 	{
@@ -256,6 +256,11 @@ if (!load)
 	{
 		// Call the main function with zero arguments
 		main(0, 0);
+	}
+	if (mainvoid)
+	{
+		// Call the main function without arguments
+		mainvoid();
 	}
 
 	// If function 'WajicMain' exists, call it

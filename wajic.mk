@@ -76,7 +76,7 @@ CLANGFLAGS += -D__WAJIC__ -D__EMSCRIPTEN__ -D_LIBCPP_ABI_VERSION=2
 
 # Flags for wasm-ld
 LDFLAGS += -no-entry -allow-undefined
-LDFLAGS += -export=__wasm_call_ctors -export=main -export=malloc -export=free
+LDFLAGS += -export=__wasm_call_ctors -export=main -export=__original_main -export=__main_argc_argv -export=__main_void -export=malloc -export=free
 
 # Project Build flags, add defines from the make command line (e.g. D=MACRO=VALUE)
 FLAGS := $(subst \\\, ,$(foreach F,$(subst \ ,\\\,$(D)),"-D$(F)"))
