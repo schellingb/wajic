@@ -399,9 +399,7 @@ function FinalizeJs(p)
 		if (!p.jsPath && !p.loadbar)
 		{
 			// Convert all WA.xyz object property access to local variable WA_xyz access
-			try { res = p.terser.parse(res); }
-			catch(e) { ABORT('Parse error in generated JS code', e, src); }
-			res.transform(new p.terser.TreeTransformer(null, function(node)
+			var varlist = "", treetransform = new p.terser.TreeTransformer(null, function(node)
 			{
 				if (node instanceof p.terser.AST_Dot || node instanceof p.terser.AST_Sub)
 				{
@@ -409,9 +407,12 @@ function FinalizeJs(p)
 					if (!(node.expression instanceof p.terser.AST_SymbolRef) || node.expression.name != 'WA') return;
 					var prop = (node.property instanceof p.terser.AST_String ? node.property.value : node.property);
 					if (typeof prop != 'string') ABORT('Unable to modify global WA object with non-simple string property access (WA[complex expresion])', node.start, src);
+					varlist +=  "WA_" + prop + ",";
 					return new p.terser.AST_SymbolRef({ start : node.start, end: node.end, name: "WA_" + prop });
 				}
-			}));
+			});
+			try { res = p.terser.parse(src).transform(treetransform); } catch(e) { ABORT('Parse error in generated JS code', e, src); }
+			if (varlist) res = p.terser.parse(src=src.replace(/var WA_/, "var " + varlist + "WA_")).transform(treetransform);
 		}
 		res = p.terser.minify(res, p.terser_options_merge);
 		if (res.error) ABORT('Error during minification of generated JS code', res.error, src);
