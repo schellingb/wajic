@@ -27,6 +27,7 @@ The output can be loaded in the WAjic viewer (available [online](https://wajic.g
     * [Embedding Files](#embedding-files)
     * [Loading URLs](#loading-urls)
     * [WebGL](#webgl)
+    * [Coroutines](#coroutines)
   * [Notes](#notes)
     * [Files in this Repository](#files-in-this-repository)
     * [Clang Parameters](#clang-parameters)
@@ -306,6 +307,17 @@ There is no shader code transformation, shaders need to be written with WebGL co
 
 Check the [WebGL sample](https://wajic.github.io/samples/?WebGL) for how to set up a canvas and render something.
 
+### Coroutines
+
+Coroutines allows execution to suspend (yield back to the browser) or switch between function contexts. It can be used to suspend a running program mid-function (wait for
+time to pass or until the next animation frame) or to emulate threads.
+
+Check the [Coroutine sample](https://wajic.github.io/samples/?Coroutine) and the implementation in [wajic_coro.h](wajic_coro.h).
+
+If you don't use WAjicUp, you will need to run another step of wasm-opt with the following command:
+
+`wasm-opt --asyncify Coroutine.wasm -o Coroutine.wasm`
+
 ## Notes
 
 ### Files in this Repository
@@ -314,6 +326,7 @@ Check the [WebGL sample](https://wajic.github.io/samples/?WebGL) for how to set 
 [wajic.h](wajic.h)                     | The main header defining the WAJIC macros as well as WA_EXPORT
 [wajic_gl.h](wajic_gl.h)               | Header defining the [WebGL functionality](#webgl)
 [wajic_file.h](wajic_file.h)           | Header defining functions for dealing with [embedded files](#embedding-files) and [loading URLs](#loading-urls)
+[wajic_coro.h](wajic_coro.h)           | Header defining functions for dealing with [Coroutine functionality](#coroutines)
 [wajic.js](wajic.js)                   | The generic WASM loader that extracts WAJIC functions and instantiates them in JavaScript. Compatible with web and Node.js (commandline).
 [wajic.minified.js](wajic.minified.js) | Minified version of wajic.js.
 [wajic.mk](wajic.mk)                   | A GNU make makefile to build [the system libraries](#manually-building-system-libraries) as well as wasm files.

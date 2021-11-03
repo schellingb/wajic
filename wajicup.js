@@ -1,6 +1,6 @@
 /*
   WAjicUp - WebAssembly JavaScript Interface Creator Utility Program
-  Copyright (C) 2020 Bernhard Schelling
+  Copyright (C) 2020-2021 Bernhard Schelling
 
   Uses Terser JavaScript compressor (https://github.com/terser/terser)
   Terser is based on UglifyJS (https://github.com/mishoo/UglifyJS2)
@@ -172,6 +172,7 @@ if (typeof process === 'object') (function()
 		if (arg.match(/^-?\/?gzipreport$/i))   { gzipReport  = true;  continue; }
 		if (arg.match(/^-?\/?(v|verbose)$/i))  { verbose     = true;  continue; }
 		if (arg.match(/^-?\/?embed$/i))        { AddEmbed(args[i], args[i+1]); i += 2; continue; }
+		if (arg.match(/^-?\/?stacksize$/i))    { p.stacksize = (args[i++]|0); continue; }
 		if (arg.match(/^-?\/?cc$/i))           { cc += ' '+args[i++]; continue; }
 		if (arg.match(/^-?\/?ld$/i))           { ld += ' '+args[i++]; continue; }
 		if (arg.match(/^-/)) return ArgErr('Invalid argument: ' + arg);
@@ -468,7 +469,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 	const memory_pages = Math.max(import_memory_pages, export_memory_pages);
 
 	var imports = GenerateJsImports(mods, libs);
-	const [use_sbrk, use_fpts, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP]
+	const [use_sbrk, use_fpts, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP, use_stks]
 		= VerifyWasmLayout(exports, mods, imports, use_memory, p);
 
 	// Fix up some special cases in the generated imports code
@@ -490,7 +491,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 
 	var body = '';
 
-	if (use_MEM || use_ASM || use_TEMP || use_WM || use_fpts)
+	if (use_MEM || use_ASM || use_TEMP || use_WM || use_fpts || use_stks)
 	{
 		var vars = '';
 		if (use_TEMP) vars +=                      'TEMP';
@@ -503,6 +504,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 		if (use_MI32) vars += (vars ? ', ' : '') + 'MI32';
 		if (use_MF32) vars += (vars ? ', ' : '') + 'MF32';
 		if (use_fpts) vars += (vars ? ', ' : '') + 'FPTS = [0,0,0]';
+		if (use_stks) vars += (vars ? ', ' : '') + 'WASM_STACK_SIZE = ' + (p.stacksize||65536);
 		if (use_sbrk) vars += (vars ? ', ' : '') + 'WASM_HEAP = ' + WasmFindHeapBase(p.wasm, memory_pages);
 		if (use_sbrk) vars += (vars ? ', ' : '') + 'WASM_HEAP_MAX = (WA.maxmem||256*1024*1024)';
 		body += '// Some global memory variables/definition' + "\n";
@@ -1040,10 +1042,12 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 	var use_MSetViews = use_MU8 || use_MU16 || use_MU32 || use_MI32 || use_MF32;
 	var use_MEM = use_sbrk || use_MSetViews;
 	var use_TEMP = mods.env.getTempRet0 || mods.env.setTempRet0;
+	var use_stks = imports.match(/\bWASM_STACK_SIZE\b/);
 	var use_malloc = imports.match(/\bASM.malloc\b/i) || use_MArrPut || use_MStrAlloc || has_main_with_args;
 	var use_free = imports.match(/\bASM.free\b/i);
+	var use_asyncify = imports.match(/\basyncify_start_unwind\b/);
 
-	VERBOSE('    [JS] Uses: ' + ([ use_memory?'Memory':0, use_sbrk?'sbrk':0, (has_main_with_args||has_main_no_args)?'main':0, has_WajicMain?'WajicMain':0, use_wasi?'wasi':0 ].filter(m=>m).join('|')));
+	VERBOSE('    [JS] Uses: ' + ([ use_memory?'Memory':0, use_sbrk?'sbrk':0, (has_main_with_args||has_main_no_args)?'main':0, has_WajicMain?'WajicMain':0, use_wasi?'wasi':0, use_asyncify?'asyncify':0 ].filter(m=>m).join('|')));
 	if (!use_memory && use_MEM)       ABORT('WASM module does not import or export memory object but requires memory manipulation');
 	if (!has_malloc && use_MArrPut)   ABORT('WASM module does not export malloc but its usage of MArrPut requires it');
 	if (!has_malloc && use_MStrAlloc) ABORT('WASM module does not export malloc but its usage of MStrPut requires it');
@@ -1053,7 +1057,7 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 	var unused_malloc = (has_malloc && !use_malloc), unused_free = (has_free && !use_free);
 	if (p.RunWasmOpt)
 	{
-		p.RunWasmOpt(unused_malloc, unused_free);
+		p.RunWasmOpt(unused_malloc, unused_free, use_asyncify);
 		if (unused_malloc) has_malloc = false;
 		if (unused_free)   has_free   = false;
 	}
@@ -1063,7 +1067,7 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 		if (unused_free)   WARN('WASM module exports free but does not use it, it should be compiled without the export');
 	}
 
-	return [use_sbrk, use_fpts, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP];
+	return [use_sbrk, use_fpts, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP, use_stks];
 }
 
 function MinifyJs(jsBytes, p)
@@ -1613,6 +1617,7 @@ function ExperimentalCompileWasm(p, wasmPath, cfiles, ccAdd, ldAdd, pathToWajic,
 
 	var ldArgs = (wantDebug ? [] : ['-strip-all']);
 	ldArgs.push('-gc-sections', '-no-entry', '-allow-undefined', '-export=__wasm_call_ctors', '-export=main', '-export=__original_main', '-export=__main_argc_argv', '-export=__main_void', '-export=malloc', '-export=free', pathToSystem+'system.bc');
+	if (p.stacksize) { ldArgs.push('-z', 'stack-size=' + p.stacksize); }
 	ldArgs = ldArgs.concat(ldAdd.trim().split(/\s+/));
 
 	var procs = [];
@@ -1633,14 +1638,23 @@ function ExperimentalCompileWasm(p, wasmPath, cfiles, ccAdd, ldAdd, pathToWajic,
 	ldArgs.push('-o', wasmPath);
 	Run(ldCmd, ldArgs, "LINKING");
 
-	p.RunWasmOpt = function(unused_malloc, unused_free)
+	p.RunWasmOpt = function(unused_malloc, unused_free, use_asyncify)
 	{
 		if (unused_malloc || unused_free) p.wasm = WasmFilterExports(p.wasm, {malloc:unused_malloc,free:unused_free});
-		if (wantDebug) return;
+		if (wantDebug && !use_asyncify) return;
 		fs.writeFileSync(wasmPath, p.wasm);
-		// adding '--ignore-implicit-traps' would be nice but it can break programs with '-Os'(see issue binaryen-2824)
-		var wasmOptArgs = ['--legalize-js-interface', '--low-memory-unused', '--converge', '-Os', wasmPath, '-o', wasmPath ];
-		Run(wasmOptCmd, wasmOptArgs, "WASMOPT");
+		if (use_asyncify)
+		{
+			var wasmOptArgs = ['--asyncify', wasmPath, '-o', wasmPath ];
+			if (wantDebug) wasmOptArgs.push('--legalize-js-interface', '-g');
+			Run(wasmOptCmd, wasmOptArgs, "WASMOPT");
+		}
+		if (!wantDebug)
+		{
+			// adding '--ignore-implicit-traps' would be nice but it can break programs with '-Os'(see issue binaryen-2824)
+			var wasmOptArgs = ['--legalize-js-interface', '--low-memory-unused', '--converge', '-Os', wasmPath, '-o', wasmPath ];
+			Run(wasmOptCmd, wasmOptArgs, "WASMOPT");
+		}
 		p.wasm = new Uint8Array(fs.readFileSync(wasmPath));
 	};
 
