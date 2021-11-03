@@ -152,6 +152,12 @@ if (typeof process === 'object') (function()
 		return (dir ? dir.replace(/\\/g, '/') + '/' : '') + (isDirectory ? (dir ? '' : './') : (path.basename(trgPath)));
 	}
 
+	function AddEmbed(name, path)
+	{
+		try { fs.readdirSync(path).forEach(f => p.embeds[name+f] = Load(path+f)); }
+		catch (e) { p.embeds[name] = Load(path); }
+	}
+
 	var p = { minify: true, log: true, embeds: {} }, inBytes, cfiles = [], cc = '', ld = '', outWasmPath, outJsPath, outHtmlPath;
 	for (var i = 0; i != args.length;)
 	{
@@ -165,7 +171,7 @@ if (typeof process === 'object') (function()
 		if (arg.match(/^-?\/?node$/i))         { p.node      = true;  continue; }
 		if (arg.match(/^-?\/?gzipreport$/i))   { gzipReport  = true;  continue; }
 		if (arg.match(/^-?\/?(v|verbose)$/i))  { verbose     = true;  continue; }
-		if (arg.match(/^-?\/?embed$/i))        { p.embeds[args[i]] = Load(args[i+1]); i += 2; continue; }
+		if (arg.match(/^-?\/?embed$/i))        { AddEmbed(args[i], args[i+1]); i += 2; continue; }
 		if (arg.match(/^-?\/?cc$/i))           { cc += ' '+args[i++]; continue; }
 		if (arg.match(/^-?\/?ld$/i))           { ld += ' '+args[i++]; continue; }
 		if (arg.match(/^-/)) return ArgErr('Invalid argument: ' + arg);

@@ -266,6 +266,10 @@ int len = fread(buf, 1, 1024, f); // read the first 1024 bytes of the file
 fclose(f);
 ```
 
+It is also possible to embed all files in a directory.
+
+`node wajicup.js EmbedFile.wasm EmbedFile.wasm -embed somedir/ ../path/to/somedir/`
+
 Check the [EmbedFile sample](https://wajic.github.io/samples/?EmbedFile) and the implementation in [wajic_file.h](wajic_file.h).
 
 ### Loading URLs
