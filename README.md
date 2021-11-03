@@ -257,6 +257,15 @@ const char* file = (const char*)WaFileMallocRead("MYFILE", &size); // allocate m
 free(file); // free the memory allocated by WaFileMallocRead
 ```
 
+Alternatively you can use some standard C functions to read embedded files:
+
+```C
+char buf[1024];
+FILE* f = fopen("MYFILE", "rb");
+int len = fread(buf, 1, 1024, f); // read the first 1024 bytes of the file
+fclose(f);
+```
+
 Check the [EmbedFile sample](https://wajic.github.io/samples/?EmbedFile) and the implementation in [wajic_file.h](wajic_file.h).
 
 ### Loading URLs

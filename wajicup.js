@@ -462,7 +462,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 	const memory_pages = Math.max(import_memory_pages, export_memory_pages);
 
 	var imports = GenerateJsImports(mods, libs);
-	const [use_sbrk, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP]
+	const [use_sbrk, use_fpts, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP]
 		= VerifyWasmLayout(exports, mods, imports, use_memory, p);
 
 	// Fix up some special cases in the generated imports code
@@ -484,7 +484,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 
 	var body = '';
 
-	if (use_MEM || use_ASM || use_TEMP || use_WM)
+	if (use_MEM || use_ASM || use_TEMP || use_WM || use_fpts)
 	{
 		var vars = '';
 		if (use_TEMP) vars +=                      'TEMP';
@@ -496,6 +496,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 		if (use_MU32) vars += (vars ? ', ' : '') + 'MU32';
 		if (use_MI32) vars += (vars ? ', ' : '') + 'MI32';
 		if (use_MF32) vars += (vars ? ', ' : '') + 'MF32';
+		if (use_fpts) vars += (vars ? ', ' : '') + 'FPTS = [0,0,0]';
 		if (use_sbrk) vars += (vars ? ', ' : '') + 'WASM_HEAP = ' + WasmFindHeapBase(p.wasm, memory_pages);
 		if (use_sbrk) vars += (vars ? ', ' : '') + 'WASM_HEAP_MAX = (WA.maxmem||256*1024*1024)';
 		body += '// Some global memory variables/definition' + "\n";
@@ -809,6 +810,21 @@ function GenerateJsImports(mods, libs)
 					if (fld[0] == 'g') imports += '		getTempRet0: () => TEMP,' + "\n";
 					if (fld[0] == 's') imports += '		setTempRet0: i => TEMP = i,' + "\n";
 				}
+				else if (fld == '__sys_open')
+				{
+					imports += '\n		// file open (can only be used to open embedded files)' + "\n";
+					imports += '		__sys_open: function(path, flags, varargs)' + "\n";
+					imports += '		{' + "\n";
+					imports += '			//console.log(\'__sys_open: path: \' + MStrGet(path) + \' - flags: \' + flags + \' - mode: \' + MU32[varargs>>2]);' + "\n";
+					imports += '			var section = WebAssembly.Module.customSections(WA.wm, \'|\'+MStrGet(path))[0];' + "\n";
+					imports += '			if (!section) return -1;' + "\n";
+					imports += '			return FPTS.push(new Uint8Array(section), 0) - 2;' + "\n";
+					imports += '		},' + "\n";
+				}
+				else if ((fld == '__sys_fcntl64' || fld == '__sys_ioctl') && mods.env.__sys_open)
+				{
+					imports += '		' + fld + ': () => 0, // does nothing in this wasm context' + "\n";
+				}
 				else
 				{
 					WARN('Unknown import function ' + mod + '.' + fld + ' - supplying dummy function with perhaps unexpected result');
@@ -838,7 +854,59 @@ function GenerateJsImports(mods, libs)
 					imports += '			print(str);' + "\n";
 					imports += '			MU32[pOutResult>>2] = ret;' + "\n";
 					imports += '			return 0; // no error' + "\n";
-					imports += '		}' + "\n";
+					imports += '		},' + "\n";
+				}
+				else if (fld == 'fd_read' && mods.env.__sys_open)
+				{
+					imports += '\n		// The fd_read function can only be used to read data from embedded files in this wasm context' + "\n";
+					imports += '		fd_read: function(fd, iov, iovcnt, pOutResult)' + "\n";
+					imports += '		{' + "\n";
+					imports += '			var buf = FPTS[fd++], cursor = FPTS[fd]|0, ret = 0;' + "\n";
+					imports += '			if (!buf) return 1;' + "\n";
+					imports += '			iov >>= 2;' + "\n";
+					imports += '			for (var i = 0; i < iovcnt && cursor != buf.length; i++)' + "\n";
+					imports += '			{' + "\n";
+					imports += '				var ptr = MU32[iov++], len = MU32[iov++];' + "\n";
+					imports += '				var curr = Math.min(len, buf.length - cursor);' + "\n";
+					imports += '				//console.log(\'fd_read - fd: \' + fd + \' - iovcnt: \' + iovcnt + \' - ptr: \' + ptr + \' - len: \' + len + \' - reading: \' + curr + \' (from \' + cursor + \' to \' + (cursor + curr) + \')\');' + "\n";
+					imports += '				MU8.set(buf.subarray(cursor, cursor + curr), ptr);' + "\n";
+					imports += '				cursor += curr;' + "\n";
+					imports += '				ret += curr;' + "\n";
+					imports += '			}' + "\n";
+					imports += '			FPTS[fd] = cursor;' + "\n";
+					imports += '			//console.log(\'fd_read -     ret: \' + ret);' + "\n";
+					imports += '			MU32[pOutResult>>2] = ret;' + "\n";
+					imports += '			return 0;' + "\n";
+					imports += '		},' + "\n";
+				}
+				else if (fld == 'fd_seek' && mods.env.__sys_open)
+				{
+					imports += '\n		// The fd_seek function can only be used to seek in embedded files in this wasm context' + "\n";
+					imports += '		fd_seek: function(fd, offset_low, offset_high, whence, pOutResult) //seek in payload' + "\n";
+					imports += '		{' + "\n";
+					imports += '			var buf = FPTS[fd++], cursor = FPTS[fd]|0;' + "\n";
+					imports += '			if (!buf) return 1;' + "\n";
+					imports += '			if (whence == 0) cursor = offset_low; //set' + "\n";
+					imports += '			if (whence == 1) cursor += offset_low; //cur' + "\n";
+					imports += '			if (whence == 2) cursor = buf.length - offset_low; //end' + "\n";
+					imports += '			if (cursor < 0) cursor = 0;' + "\n";
+					imports += '			if (cursor > buf.length) cursor = buf.length;' + "\n";
+					imports += '			//console.log(\'fd_seek - fd: \' + fd + \' - offset_high: \' + offset_high + \' - offset_low: \' + offset_low + \' - whence: \' +whence + \' - seek to: \' + cursor);' + "\n";
+					imports += '			FPTS[fd] = MU32[pOutResult>>2] = cursor;' + "\n";
+					imports += '			MU32[(pOutResult>>2)+1] = 0; // high' + "\n";
+					imports += '			return 0;' + "\n";
+					imports += '		},' + "\n";
+				}
+				else if (fld == 'fd_close' && mods.env.__sys_open)
+				{
+					imports += '\n		// The fd_close clears an opened file buffer' + "\n";
+					imports += '		fd_close: function(fd)' + "\n";
+					imports += '		{' + "\n";
+					imports += '			if (!FPTS[fd]) return 1;' + "\n";
+					imports += '			//console.log(\'fd_close - fd: \' + fd);' + "\n";
+					imports += '			FPTS[fd] = 0;' + "\n";
+					imports += '			return 0;' + "\n";
+					imports += '		},' + "\n";
 				}
 				else
 				{
@@ -951,9 +1019,10 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 	var has_free = !!exports.free;
 	var use_sbrk = !!mods.env.sbrk;
 	var use_wasi = (Object.keys(mods).join('|')).includes('wasi');
+	var use_fpts = (use_wasi && mods.env.__sys_open);
 	var use_MStrPut = imports.match(/\bMStrPut\b/);
 	var use_MStrAlloc = (use_MStrPut && imports.match(/\bMStrPut\([^,\)]+\)/));
-	var use_MStrGet = imports.match(/\bMStrGet\b/) || use_wasi;
+	var use_MStrGet = imports.match(/\bMStrGet\b/) || use_wasi || mods.env.__assert_fail;
 	var use_MArrPut = imports.match(/\bMArrPut\b/);
 	var use_WM = imports.match(/\bWM\b/);
 	var use_ASM = imports.match(/\bASM\b/) || use_MStrPut || use_MArrPut;
@@ -965,7 +1034,7 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 	var use_MSetViews = use_MU8 || use_MU16 || use_MU32 || use_MI32 || use_MF32;
 	var use_MEM = use_sbrk || use_MSetViews;
 	var use_TEMP = mods.env.getTempRet0 || mods.env.setTempRet0;
-	var use_malloc = imports.match(/\bASM.malloc\b/i) || use_MArrPut || use_MStrAlloc;
+	var use_malloc = imports.match(/\bASM.malloc\b/i) || use_MArrPut || use_MStrAlloc || has_main_with_args;
 	var use_free = imports.match(/\bASM.free\b/i);
 
 	VERBOSE('    [JS] Uses: ' + ([ use_memory?'Memory':0, use_sbrk?'sbrk':0, (has_main_with_args||has_main_no_args)?'main':0, has_WajicMain?'WajicMain':0, use_wasi?'wasi':0 ].filter(m=>m).join('|')));
@@ -988,7 +1057,7 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 		if (unused_free)   WARN('WASM module exports free but does not use it, it should be compiled without the export');
 	}
 
-	return [use_sbrk, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP];
+	return [use_sbrk, use_fpts, use_MStrPut, use_MStrGet, use_MArrPut, use_WM, use_ASM, use_MU8, use_MU16, use_MU32, use_MI32, use_MF32, use_MSetViews, use_MEM, use_TEMP];
 }
 
 function MinifyJs(jsBytes, p)
@@ -1530,7 +1599,7 @@ function ExperimentalCompileWasm(p, wasmPath, cfiles, ccAdd, ldAdd, pathToWajic,
 	var ccArgs = [ '-cc1', '-triple', 'wasm32', '-emit-obj', '-fcolor-diagnostics', '-I'+pathToWajic, '-D__WAJIC__',
 		'-isystem'+pathToSystem+'include/libcxx', '-isystem'+pathToSystem+'include/compat', '-isystem'+pathToSystem+'include', '-isystem'+pathToSystem+'include/libc', '-isystem'+pathToSystem+'lib/libc/musl/arch/emscripten',
 		'-mconstructor-aliases', '-fvisibility', 'hidden', '-fno-threadsafe-statics', //reduce output size
-		'-fno-common', '-fgnuc-version=4.2.1', '-D__EMSCRIPTEN__', '-D_LIBCPP_ABI_VERSION=2' ]; //required for musl-libc
+		'-fno-common', '-fgnuc-version=4.2.1', '-D__EMSCRIPTEN__', '-D_LIBCPP_ABI_VERSION=2', '-D_POSIX_C_SOURCE' ]; //required for musl-libc
 	if (wantDebug) ccArgs.push('-DDEBUG', '-debug-info-kind=limited');
 	else if (hasO) ccArgs.push('-DNDEBUG');
 	else ccArgs.push('-DNDEBUG', '-Os'); //default optimizations
