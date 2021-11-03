@@ -750,17 +750,32 @@ function GenerateJsImports(mods, libs)
 					imports += '\n		// Function querying the system time' + "\n";
 					imports += '		gettimeofday: function(ptr) { var now = Date.now(); MU32[ptr>>2]=(now/1000)|0; MU32[(ptr+4)>>2]=((now % 1000)*1000)|0; },' + "\n";
 				}
+				else if (fld == 'clock_gettime')
+				{
+					imports += '\n		// Function querying an exact clock' + "\n";
+					imports += '		clock_gettime: function(clock, tp)' + "\n";
+					imports += '		{' + "\n";
+					imports += '			clock = (clock ? window.performance.now() : Date.now()), tp >>= 2;' + "\n";
+					imports += '			if (tp) MU32[tp] = (clock/1000)|0, MU32[tp+1] = ((clock%1000)*1000000+.1)|0;' + "\n";
+					imports += '		},' + "\n";
+				}
+				else if (fld == 'clock_getres')
+				{
+					imports += '\n		// Function querying the resolution of an exact clock' + "\n";
+					imports += '		clock_getres: function(clock, tp)' + "\n";
+					imports += '		{' + "\n";
+					imports += '			clock = (clock ? .1 : 1), tp >>= 2;' + "\n";
+					imports += '			if (tp) MU32[tp] = (clock/1000)|0, MU32[tp+1] = ((clock%1000)*1000000)|0;' + "\n";
+					imports += '		},' + "\n";
+				}
+				else if (fld == 'exit')
+				{
+					imports += '		exit: function(status) { abort(\'EXIT\', \'Exit called: \' + status); },' + "\n";
+				}
 				else if (fld == '__assert_fail')
 				{
 					imports += '\n		// Failed assert will abort the program' + "\n";
-					if (use_MStrGet)
-					{
-						imports += '		__assert_fail: (condition, filename, line, func) => crashFunction(\'assert \' + MStrGet(condition) + \' at: \' + (filename ? MStrGet(filename) : \'?\'), line, (func ? MStrGet(func) : \'?\')),' + "\n";
-					}
-					else
-					{
-						imports += '		__assert_fail: (condition, filename, line, func) => crashFunction(\'assert fail\'),' + "\n";
-					}
+					imports += '		__assert_fail: (condition, filename, line, func) => crashFunction(\'assert \' + MStrGet(condition) + \' at: \' + (filename ? MStrGet(filename) : \'?\'), line, (func ? MStrGet(func) : \'?\')),' + "\n";
 				}
 				else if (fld == '__cxa_uncaught_exception')
 				{
