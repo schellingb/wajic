@@ -43,4 +43,11 @@ WA_EXPORT(WajicMain) void WajicMain(int i)
 	printf("Data: [%.*s] (read bytes: %d)\n", read, data, read);
 
 	printf("File size: %u\n", WaFileGetSize("TXT"));
+
+	char buf[128 + 1];
+	FILE* f = fopen("TXT", "rb");
+	int len = fread(buf, 1, 128, f);
+	fclose(f);
+	buf[128] = '\0';
+	printf("fread len: %d - content: [%s]...\n", len, buf);
 }
