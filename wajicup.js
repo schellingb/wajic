@@ -89,7 +89,7 @@ if (typeof process === 'object') (function()
 		console.error('');
 		console.error('Usage wajicup.js [<switches>...] <input_file> [<output_files>...]');
 		console.error('');
-		console.error('<input_file> must be an unprocessed .wasm file');
+		console.error('<input_file> must be an unprocessed .wasm file or c source file(s)');
 		console.error('');
 		console.error('<output_files> can be up to 3 files of different types');
 		console.error('  .wasm: Minified/reduced wasm module');
@@ -106,16 +106,18 @@ if (typeof process === 'object') (function()
 		console.error('   [HTML]             Embed WASM into single file HTML');
 		console.error('');
 		console.error('<switches>');
-		console.error('  -no_minify:  Don\'t minify JavaScript code');
-		console.error('  -no_log:     Remove all output logging');
-		console.error('  -streaming:  Enable WASM streaming (needs web server support, new browser)');
-		console.error('  -rle:        Use RLE compression when embedding the WASM file');
-		console.error('  -loadbar:    Add a loading progress bar to the generated HTML');
-		console.error('  -node:       Output JavaScript that runs in Node.js (CLI)');
-		console.error('  -embed N P:  Embed data file at path P with name N');
-		console.error('  -gzipreport: Report the output size after gzip compression');
-		console.error('  -v:          Be verbose about processed functions');
-		console.error('  -h:          Show this help');
+		console.error('  -no_minify:   Don\'t minify JavaScript code');
+		console.error('  -no_log:      Remove all output logging');
+		console.error('  -streaming:   Enable WASM streaming (needs web server support, modern browser)');
+		console.error('  -rle:         Use RLE compression when embedding the WASM file');
+		console.error('  -loadbar:     Add a loading progress bar to the generated HTML');
+		console.error('  -node:        Output JavaScript that runs in Node.js (CLI)');
+		console.error('  -embed N P:   Embed data file at path P with name N');
+		console.error('  -template F:  Use F as the template for the generated HTML file');
+		console.error('  -stacksize N: Set the stack size (defaults to 64kb)');
+		console.error('  -gzipreport:  Report the output size after gzip compression');
+		console.error('  -v:           Be verbose about processed functions');
+		console.error('  -h:           Show this help');
 		console.error('');
 		throw process.exit(0);
 	}
@@ -172,6 +174,7 @@ if (typeof process === 'object') (function()
 		if (arg.match(/^-?\/?gzipreport$/i))   { gzipReport  = true;  continue; }
 		if (arg.match(/^-?\/?(v|verbose)$/i))  { verbose     = true;  continue; }
 		if (arg.match(/^-?\/?embed$/i))        { AddEmbed(args[i], args[i+1]); i += 2; continue; }
+		if (arg.match(/^-?\/?template$/i))     { p.template = Load(args[i++]); continue; }
 		if (arg.match(/^-?\/?stacksize$/i))    { p.stacksize = (args[i++]|0); continue; }
 		if (arg.match(/^-?\/?cc$/i))           { cc += ' '+args[i++]; continue; }
 		if (arg.match(/^-?\/?ld$/i))           { ld += ' '+args[i++]; continue; }
@@ -206,8 +209,10 @@ if (typeof process === 'object') (function()
 		if ( outWasmPath && p.rle)       return ArgErr('When outputting a .wasm file, option -rle is invalid');
 		if (!outWasmPath && p.streaming) return ArgErr('When embedding the .wasm file, option -streaming is invalid');
 		if ( outHtmlPath && p.node)      return ArgErr('When generating the .html file, option -node is invalid');
+		if (!outHtmlPath && p.template)  return ArgErr('When not generating the .html file, option -template is invalid');
 		if (!outHtmlPath && p.loadbar)   return ArgErr('When not generating the .html file, option -loadbar is invalid');
-		if (!outJsPath && !outWasmPath && p.loadbar) return ArgErr('With just a single output file, option -loadbar is invalid');
+		if (p.loadbar && !outJsPath && !outWasmPath) return ArgErr('With just a single output file, option -loadbar is invalid');
+		if (p.loadbar && p.template) return ArgErr('Options -loadbar and -template can not be used together');
 	}
 	else
 	{
@@ -215,6 +220,7 @@ if (typeof process === 'object') (function()
 		if (!p.minify)   return ArgErr('When processing a .js file, minify must be enabled');
 		if (p.streaming) return ArgErr('When processing a .js file, option -streaming is invalid');
 		if (p.rle)       return ArgErr('When processing a .js file, option -rle is invalid');
+		if (p.template)  return ArgErr('When processing a .js file, option -template is invalid');
 		if (p.embeds && Object.keys(p.embeds).length) return ArgErr('When processing a .js file, option -embed is invalid');
 	}
 
@@ -273,7 +279,22 @@ function IsWasmFile(inBytes)
 
 function GenerateHtml(p)
 {
-	VERBOSE('    [HTML] Generate - Log: ' + p.log + ' - Canvas: ' + p.use_canvas + (p.jsPath ? ' - JS: ' + p.jsPath : '') + (p.wasmPath ? ' - WASM: ' + p.wasmPath : ''));
+	VERBOSE('    [HTML] Generate - Log: ' + p.log + ' - Canvas: ' + p.use_canvas + (p.jsPath ? ' - JS: ' + p.jsPath : '') + (p.wasmPath ? ' - WASM: ' + p.wasmPath : '') + (p.template ? ' - USING TEMPLATE' : ''));
+	if (p.template)
+	{
+		var template = ReadUTF8String(p.template);
+		if (p.use_canvas && !template.match(/\bwa_canvas\b/)) ABORT('Template is missing wa_canvas element');
+		if (!p.jsPath && !template.match(/{{{js}}}/)) ABORT('Template is missing {{{js}}} tag to insert generated output - Example:\n<script>"use strict";' + "\n" + (p.meta ? p.meta : '') + '{{{js}}}\n</'+'script>');
+		if (p.jsPath && !template.match(/{{{jsPath}}}/)) ABORT('Template is missing {{{jsPath}}} tag to insert path to javascript file - Example:\n<script defer src="{{{jsPath}}}"></'+'script>');
+		if (p.wasmPath && !template.match(/{{{wasmPath}}}/)) ABORT('Template is missing {{{wasmPath}}} tag to insert path to wasm file - Example:\n<script defer src="{{{jsPath}}}" data-wasm="{{{wasmPath}}}"></'+'script>');
+		if (p.jsPath && template.match(/{{{js}}}/)) ABORT('Template has unused {{{js}}} tag to insert generated output, it needs to be removed');
+		if (!p.jsPath && template.match(/{{{jsPath}}}/)) ABORT('Template has unused {{{jsPath}}} tag to insert path to javascript file, it needs to be removed');
+		if (!p.wasmPath && template.match(/{{{wasmPath}}}/)) ABORT('Template has unused {{{wasmPath}}} tag to insert path to wasm file, it needs to be removed');
+		if (!p.jsPath) template = template.replace(/{{{js}}}/, p.js);
+		if (p.jsPath) template = template.replace(/{{{jsPath}}}/, p.jsPath);
+		if (p.wasmPath) template = template.replace(/{{{wasmPath}}}/, p.wasmPath);
+		return template;
+	}
 	var both = (p.jsPath && p.wasmPath);
 	return '<!doctype html>' + "\n"
 		+ '<html lang="en-us">' + "\n"
@@ -367,7 +388,7 @@ function FinalizeJs(p)
 	if (p.loadbar && p.wasmPath) res += 'WA.loaded = function(wasm){';
 	else res += (p.jsPath ? 'var WA = WA||{' + (p.wasmPath ? 'module:\'' + p.wasmPath + '\'' : '') + '};' : '') + '(function(){';
 	res += "\n\n";
-	if (p.minify && !p.jsPath && !p.loadbar)
+	if (p.minify && !p.jsPath && !p.loadbar && !p.template)
 	{
 		// pre-declare all variables for minification
 		res += 'var WA_'+[ 'maxmem', 'asm', 'wm', 'abort' ].join(',WA_')+';' + "\n"
@@ -403,7 +424,7 @@ function FinalizeJs(p)
 	else
 	{
 		var src = res;
-		if (!p.jsPath && !p.loadbar)
+		if (!p.jsPath && !p.loadbar && !p.template)
 		{
 			// Convert all WA.xyz object property access to local variable WA_xyz access
 			var varlist = "", treetransform = new p.terser.TreeTransformer(null, function(node)
@@ -491,7 +512,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 
 	var body = '';
 
-	if (use_MEM || use_ASM || use_TEMP || use_WM || use_fpts || use_stks)
+	if (use_MEM || use_ASM || use_TEMP || use_WM || use_stks)
 	{
 		var vars = '';
 		if (use_TEMP) vars +=                      'TEMP';
