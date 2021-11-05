@@ -408,7 +408,7 @@ WAJIC_LIB(GL, void, glDeleteFramebuffers, (GLsizei n, const GLuint *framebuffers
 
 WAJIC_LIB(GL, void, glDeleteProgram, (GLuint program),
 {
-	if (!id) return;
+	if (!program) return;
 	var program_obj = GLprograms[program];
 	if (!program_obj) 
 		// glDeleteProgram actually signals an error when deleting a nonexisting object, unlike some other GL delete functions.
