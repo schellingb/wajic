@@ -246,7 +246,7 @@ if (typeof process === 'object') (function()
 function ProcessFile(inBytes, p)
 {
 	var minify_compress = { ecma: 2015, passes: 5, unsafe: true, unsafe_arrows: true, unsafe_math: true, drop_console: !p.log, pure_funcs:['document.getElementById'] };
-	var minify_reserved = ['abort', 'MU8', 'MU16', 'MU32', 'MI32', 'MF32', 'STOP', 'TEMP', 'MStrPut', 'MStrGet', 'MArrPut', 'ASM', 'WM', 'J', 'N' ];
+	var minify_reserved = ['abort', 'MU8', 'MU16', 'MU32', 'MI32', 'MF32', 'WASM_STACK_SIZE', 'STOP', 'TEMP', 'MStrPut', 'MStrGet', 'MArrPut', 'ASM', 'WM', 'J', 'N' ];
 	p.terser = require_terser();
 	p.terser_options_toplevel = { compress: minify_compress, format: { wrap_func_args: false }, mangle: { eval: 1, reserved: minify_reserved }, toplevel: true };
 	p.terser_options_reserve = { compress: minify_compress, format: { wrap_func_args: false }, mangle: { eval: 1, reserved: minify_reserved } };
@@ -1189,7 +1189,7 @@ function WasmReplaceLibImportNames(wasm, libs)
 			AppendBuf(wasmOut, wasm.subarray(0, iSectionBeforeLength));
 			wasmDone = iSectionAfterLength;
 		},
-		function (iSectionEnd)
+		function(iSectionEnd)
 		{
 			AppendBuf(importOut, wasm.subarray(wasmDone, iSectionEnd));
 			AppendLEB(wasmOut, importOut.len);
