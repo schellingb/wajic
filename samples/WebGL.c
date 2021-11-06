@@ -26,6 +26,7 @@ For more information, please refer to <http://unlicense.org/>
 */
 
 #include <math.h>
+#include <stdlib.h>
 #include <wajic.h>
 #include <wajic_gl.h>
 
