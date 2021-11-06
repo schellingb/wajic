@@ -1,6 +1,6 @@
 #
 #  WAjic - WebAssembly JavaScript Interface Creator
-#  Copyright (C) 2020 Bernhard Schelling
+#  Copyright (C) 2020-2021 Bernhard Schelling
 #
 #  This software is provided 'as-is', without any express or implied
 #  warranty.  In no event will the authors be held liable for any damages
@@ -59,16 +59,17 @@ endif
 
 # Global compiler flags
 CXXFLAGS := -x c++ -std=c++11 -fno-rtti $(OFLAGS)
-CFLAGS   := -x c -std=c99 $(OFLAGS)
+CFLAGS   := -x c -std=c11 $(OFLAGS)
 
 # Global compiler flags for Wasm targeting
-CLANGFLAGS := -triple wasm32 -emit-obj -fcolor-diagnostics
+CLANGFLAGS := -triple wasm32-unknown-emscripten -emit-obj -fcolor-diagnostics
 CLANGFLAGS += -I${WAJIC_ROOT}
-CLANGFLAGS += -isystem$(SYSTEM_ROOT)/include/libcxx
+CLANGFLAGS += -isystem$(SYSTEM_ROOT)/$(if $(wildcard $(SYSTEM_ROOT)/include/libcxx),include/libcxx,lib/libcxx/include) # due to change in 2.0.13
 CLANGFLAGS += -isystem$(SYSTEM_ROOT)/include/compat
 CLANGFLAGS += -isystem$(SYSTEM_ROOT)/include
-CLANGFLAGS += -isystem$(SYSTEM_ROOT)/include/libc
+CLANGFLAGS += -isystem$(SYSTEM_ROOT)/$(if $(wildcard $(SYSTEM_ROOT)/include/libc),include/libc,lib/libc/musl/include) # due to change in 2.0.13
 CLANGFLAGS += -isystem$(SYSTEM_ROOT)/lib/libc/musl/arch/emscripten
+CLANGFLAGS += $(if $(wildcard $(SYSTEM_ROOT)/lib/libc/musl/arch/generic),-isystem$(SYSTEM_ROOT)/lib/libc/musl/arch/generic) # for 2.0.13 and newer
 CLANGFLAGS += -fno-common #required for musl-libc
 CLANGFLAGS += -mconstructor-aliases #lower .o file size
 CLANGFLAGS += -fvisibility hidden -fno-threadsafe-statics -fgnuc-version=4.2.1
@@ -132,7 +133,9 @@ endef
 #------------------------------------------------------------------------------------------------------
 #if system.bc exists, don't even bother checking sources, build once and forget for now
 ifeq ($(if $(wildcard $(WAJIC_ROOT)system/system.bc),1,0),0)
-SYS_ADDS := emmalloc.cpp libcxx/*.cpp libcxxabi/src/cxa_guard.cpp compiler-rt/lib/builtins/*.c libc/wasi-helpers.c
+SYS_ADDS := emmalloc.c libcxxabi/src/cxa_guard.cpp compiler-rt/lib/builtins/*.c libc/wasi-helpers.c pthread/library_pthread_stub.c
+SYS_ADDS += $(if $(wildcard $(SYSTEM_ROOT)/lib/libc/emscripten_pthread.c),libc/emscripten_pthread.c) # needed for 2.0.13 until 2.0.25
+SYS_ADDS += libcxx/$(if $(wildcard $(SYSTEM_ROOT)/lib/libcxx/src/*.cpp),src/)*.cpp # due to change in 2.0.13
 SYS_MUSL := complex crypt ctype dirent errno fcntl fenv internal locale math misc mman multibyte prng regex select stat stdio stdlib string termios unistd
 #SYS_MUSL += compat-emscripten time #uncomment if you need time formatting and C++ streams and locale
 
@@ -142,6 +145,7 @@ SYS_IGNORE += iostream.cpp strstream.cpp locale.cpp  #comment out if you need C+
 SYS_IGNORE += abs.c acos.c acosf.c acosl.c asin.c asinf.c asinl.c atan.c atan2.c atan2f.c atan2l.c atanf.c atanl.c ceil.c ceilf.c ceill.c cos.c cosf.c cosl.c exp.c expf.c expl.c 
 SYS_IGNORE += fabs.c fabsf.c fabsl.c floor.c floorf.c floorl.c log.c logf.c logl.c pow.c powf.c powl.c rintf.c round.c roundf.c sin.c sinf.c sinl.c sqrt.c sqrtf.c sqrtl.c tan.c tanf.c tanl.c
 SYS_IGNORE += syscall.c wordexp.c initgroups.c getgrouplist.c popen.c _exit.c alarm.c usleep.c faccessat.c iconv.c
+SYS_IGNORE += gcc_personality_v0.c # 1.39.20 and newer only
 
 SYS_SOURCES := $(filter-out $(SYS_IGNORE:%=\%/%),$(wildcard $(addprefix $(SYSTEM_ROOT)/lib/,$(SYS_ADDS) $(SYS_MUSL:%=libc/musl/src/%/*.c))))
 SYS_SOURCES := $(subst $(SYSTEM_ROOT)/lib/,,$(SYS_SOURCES))
@@ -155,22 +159,23 @@ ifeq ($(if $(SYS_MISSING),1,0),1)
   $(error SYS_SOURCES missing the following files in $(SYSTEM_ROOT)/lib: $(SYS_MISSING))
 endif
 
-SYS_OLDFILES := $(filter-out $(subst /,!,$(patsubst %.c,%.o,$(patsubst %.cpp,%.o,$(SYS_SOURCES)))),$(notdir $(wildcard temp/*.o)))
-$(foreach F,$(SYS_OLDFILES),$(shell $(if $(ISWIN),del "temp\,rm "temp/)$(F)" $(PIPETONULL)))
+SYS_TEMP := temp
+SYS_OLDFILES := $(filter-out $(subst /,!,$(patsubst %.c,%.o,$(patsubst %.cpp,%.o,$(SYS_SOURCES)))),$(notdir $(wildcard $(SYS_TEMP)/*.o)))
+$(foreach F,$(SYS_OLDFILES),$(shell $(if $(ISWIN),del "$(SYS_TEMP)\,rm "$(SYS_TEMP)/)$(F)" $(PIPETONULL)))
 
-SYS_CXXFLAGS := -x c++ -std=c++11 -Os -fno-threadsafe-statics -fno-rtti -I$(SYSTEM_ROOT)/lib/libcxxabi/include
+SYS_CXXFLAGS := -x c++ -Os -std=c++11 -fno-threadsafe-statics -fno-rtti -I$(SYSTEM_ROOT)/lib/libcxxabi/include
 SYS_CXXFLAGS += -DNDEBUG -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS
 
-SYS_CFLAGS := -x c -std=gnu99 -Os -fno-threadsafe-statics -fno-builtin
+SYS_CFLAGS := -x c -Os -std=gnu11 -fno-threadsafe-statics -fno-builtin
 SYS_CFLAGS += -DNDEBUG -Dunix -D__unix -D__unix__ -D_XOPEN_SOURCE
 SYS_CFLAGS += -isystem$(SYSTEM_ROOT)/lib/libc/musl/src/internal
 SYS_CFLAGS += -Wno-dangling-else -Wno-ignored-attributes -Wno-bitwise-op-parentheses -Wno-logical-op-parentheses -Wno-shift-op-parentheses -Wno-string-plus-int
 SYS_CFLAGS += -Wno-unknown-pragmas -Wno-shift-count-overflow -Wno-return-type -Wno-macro-redefined -Wno-unused-result -Wno-pointer-sign -Wno-implicit-function-declaration
 
-SYS_CPP_OBJS := $(addprefix temp/,$(subst /,!,$(patsubst %.cpp,%.o,$(filter %.cpp,$(SYS_SOURCES)))))
-SYS_CC_OBJS  := $(addprefix temp/,$(subst /,!,$(patsubst   %.c,%.o,$(filter   %.c,$(SYS_SOURCES)))))
-$(SYS_CPP_OBJS) : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst temp/%.o,$(SYSTEM_ROOT)/lib/%.cpp,$@)),$(CC),$(SYS_CXXFLAGS))
-$(SYS_CC_OBJS)  : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst temp/%.o,$(SYSTEM_ROOT)/lib/%.c,$@)),$(CC),$(SYS_CFLAGS))
+SYS_CPP_OBJS := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst %.cpp,%.o,$(filter %.cpp,$(SYS_SOURCES)))))
+SYS_CC_OBJS  := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst   %.c,%.o,$(filter   %.c,$(SYS_SOURCES)))))
+$(SYS_CPP_OBJS) : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst $(SYS_TEMP)/%.o,$(SYSTEM_ROOT)/lib/%.cpp,$@)),$(CC),$(SYS_CXXFLAGS))
+$(SYS_CC_OBJS)  : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst $(SYS_TEMP)/%.o,$(SYSTEM_ROOT)/lib/%.c,$@)),$(CC),$(SYS_CFLAGS))
 
 define SYS_COMPILE
 	$(info $2)
@@ -180,7 +185,8 @@ endef
 
 $(WAJIC_ROOT)system/system.bc : $(SYS_CPP_OBJS) $(SYS_CC_OBJS)
 	$(info Creating archive $@ ...)
-	@$(LD) $(if $(ISWIN),"temp/*.o",temp/*.o) -r -o $@
-	@$(if $(ISWIN),rmdir /S /Q,rm -rf) "temp"
+	@$(if $(wildcard $(dir $@)),,$(shell mkdir "$(dir $@)"))
+	@$(LD) $(if $(ISWIN),"$(SYS_TEMP)/*.o",$(SYS_TEMP)/*.o) -r -o $@
+	@$(if $(ISWIN),rmdir /S /Q,rm -rf) "$(SYS_TEMP)"
 endif #need system.bc
 #------------------------------------------------------------------------------------------------------

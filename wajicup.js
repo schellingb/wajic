@@ -296,7 +296,7 @@ function GenerateHtml(p)
 		if (p.use_canvas && !template.match(/\bwa_canvas\b/)) ABORT('Template is missing wa_canvas element');
 		if (!p.jsPath && !template.match(/{{{js}}}/)) ABORT('Template is missing {{{js}}} tag to insert generated output - Example:\n<script>"use strict";' + "\n" + (p.meta ? p.meta : '') + '{{{js}}}\n</'+'script>');
 		if (p.jsPath && !template.match(/{{{jsPath}}}/)) ABORT('Template is missing {{{jsPath}}} tag to insert path to javascript file - Example:\n<script defer src="{{{jsPath}}}"></'+'script>');
-		if (p.wasmPath && !template.match(/{{{wasmPath}}}/)) ABORT('Template is missing {{{wasmPath}}} tag to insert path to wasm file - Example:\n<script defer src="{{{jsPath}}}" data-wasm="{{{wasmPath}}}"></'+'script>');
+		if (p.wasmPath && !template.match(/{{{wasmPath}}}/)) ABORT('Template is missing {{{wasmPath}}} tag to insert path to wasm file - Example:\n' + (p.jsPath ? '<script defer src="{{{jsPath}}}" data-wasm="{{{wasmPath}}}"></'+'script>' : 'WA.module = "{{{wasmPath}}}";'));
 		if (p.jsPath && template.match(/{{{js}}}/)) ABORT('Template has unused {{{js}}} tag to insert generated output, it needs to be removed');
 		if (!p.jsPath && template.match(/{{{jsPath}}}/)) ABORT('Template has unused {{{jsPath}}} tag to insert path to javascript file, it needs to be removed');
 		if (!p.wasmPath && template.match(/{{{wasmPath}}}/)) ABORT('Template has unused {{{wasmPath}}} tag to insert path to wasm file, it needs to be removed');
@@ -1638,7 +1638,7 @@ function ExperimentalCompile(p, cfiles, ccAdd, ldAdd, pathToWajic, pathToSystem,
 	if (wantRtti) ccAdd = ccAdd.replace(/-frtti($| )/, ''); //actually not a real clang option
 
 	var ccArgs = [ '-cc1', '-triple', 'wasm32', '-emit-obj', '-fcolor-diagnostics', '-I'+pathToWajic, '-D__WAJIC__',
-		'-isystem'+pathToSystem+'include/libcxx', '-isystem'+pathToSystem+'include/compat', '-isystem'+pathToSystem+'include', '-isystem'+pathToSystem+'include/libc', '-isystem'+pathToSystem+'lib/libc/musl/arch/emscripten',
+		'-isystem'+pathToSystem+'include/libcxx', '-isystem'+pathToSystem+'lib/libcxx/include', '-isystem'+pathToSystem+'include/compat', '-isystem'+pathToSystem+'include', '-isystem'+pathToSystem+'include/libc', '-isystem'+pathToSystem+'lib/libc/musl/include', '-isystem'+pathToSystem+'lib/libc/musl/arch/emscripten', '-isystem'+pathToSystem+'lib/libc/musl/arch/generic',
 		'-mconstructor-aliases', '-fvisibility', 'hidden', '-fno-threadsafe-statics', //reduce output size
 		'-fno-common', '-fgnuc-version=4.2.1', '-D__EMSCRIPTEN__', '-D_LIBCPP_ABI_VERSION=2', '-D_POSIX_C_SOURCE' ]; //required for musl-libc
 	if (wantDebug) ccArgs.push('-DDEBUG', '-debug-info-kind=limited');
