@@ -160,7 +160,7 @@ if (typeof process === 'object') (function()
 		catch (e) { p.embeds[name] = Load(path); }
 	}
 
-	var p = { minify: true, log: true, embeds: {} }, inBytes, cfiles = [], cc = '', ld = '', outWasmPath, outJsPath, outHtmlPath;
+	var p = { minify: true, log: true, embeds: {} }, inBytes, cfiles = [], cc = '', ld = '', outWasmPath, outJsPath, outHtmlPath, outObjPath, outBcPath;
 	for (var i = 0; i != args.length;)
 	{
 		var arg = args[i++];
@@ -180,12 +180,12 @@ if (typeof process === 'object') (function()
 		if (arg.match(/^-?\/?ld$/i))           { ld += ' '+args[i++]; continue; }
 		if (arg.match(/^-/)) return ArgErr('Invalid argument: ' + arg);
 
-		var path = arg.match(/^.*\.(wasm|js|html|c|cpp|cc|cxx?)$/i), ext = (path && path[1][0].toUpperCase());
+		var path = arg.match(/^.*\.(wasm|js|html|c|cpp|cc|cxx|o|bc?)$/i), ext = (path && path[1][0].toUpperCase());
 		if (ext == 'C')
 		{
 			cfiles.push(arg);
 		}
-		else if (!inBytes && cfiles.length == 0)
+		else if (!inBytes && cfiles.length == 0 && !ld)
 		{
 			if (ext == 'W' || ext == 'J') inBytes = Load(arg);
 			else return ArgErr('Invalid input file: ' + arg + "\n" + 'Must be a file ending with .wasm');
@@ -195,14 +195,23 @@ if (typeof process === 'object') (function()
 			if      (ext == 'W') { if (!outWasmPath) outWasmPath = arg; else return ArgErr('Invalid output file: ' + arg + "\n" + 'Cannot output multiple .wasm files'); }
 			else if (ext == 'J') { if (!outJsPath  ) outJsPath   = arg; else return ArgErr('Invalid output file: ' + arg + "\n" + 'Cannot output multiple .js files');   }
 			else if (ext == 'H') { if (!outHtmlPath) outHtmlPath = arg; else return ArgErr('Invalid output file: ' + arg + "\n" + 'Cannot output multiple .html files'); }
+			else if (ext == 'O') { if (!outObjPath ) outObjPath  = arg; else return ArgErr('Invalid output file: ' + arg + "\n" + 'Cannot output multiple .o files');    }
+			else if (ext == 'B') { if (!outBcPath  ) outBcPath   = arg; else return ArgErr('Invalid output file: ' + arg + "\n" + 'Cannot output multiple .bc files');    }
 			else return ArgErr('Invalid output file: ' + arg + "\n" + 'Must be a file ending with .wasm/.js/.html');
 		}
 	}
 
 	// Validate options
-	if (!inBytes && !cfiles.length) return ArgErr('Missing input file and output file(s)');
-	if (!outWasmPath && !outJsPath && !outHtmlPath) return ArgErr('Missing output file(s)');
-	if (cfiles.length || IsWasmFile(inBytes))
+	if (!inBytes && !cfiles.length && !ld) return ArgErr('Missing input file and output file(s)');
+	if (!outWasmPath && !outJsPath && !outHtmlPath && !outObjPath && !outBcPath) return ArgErr('Missing output file(s)');
+	if (outObjPath || outBcPath)
+	{
+		if (outObjPath && outBcPath) return ArgErr('Unable to output both .o and .bc files');
+		for (var i = 0; i != args.length; i++) if (args[i].match(/^-[^cv]/)) return ArgErr('Invalid argument for .o or .bc output: ' + args[i]);
+		if (outObjPath && (inBytes || cfiles.length != 1 || outWasmPath || outJsPath || outHtmlPath)) return ArgErr('When outputting a .o file, there must be exactly one .c file as input');
+		if (outBcPath && (inBytes || cfiles.length == 0 || outWasmPath || outJsPath || outHtmlPath)) return ArgErr('When outputting a .bc file, there must be only .c files as input');
+	}
+	else if (cfiles.length || ld || IsWasmFile(inBytes))
 	{
 		if ( outWasmPath && p.streaming) return ArgErr('When outputting just a .wasm file, option -streaming is invalid');
 		if ( outWasmPath && p.node)      return ArgErr('When outputting just a .wasm file, option -node is invalid');
@@ -216,7 +225,7 @@ if (typeof process === 'object') (function()
 	}
 	else
 	{
-		if (!outJsPath || outWasmPath || outHtmlPath) return ArgErr('When minifying a JS file, only one output file ending with .js is supported');
+		if (!outJsPath || outWasmPath || outHtmlPath || outObjPath || outBcPath) return ArgErr('When minifying a JS file, only one output file ending with .js is supported');
 		if (!p.minify)   return ArgErr('When processing a .js file, minify must be enabled');
 		if (p.streaming) return ArgErr('When processing a .js file, option -streaming is invalid');
 		if (p.rle)       return ArgErr('When processing a .js file, option -rle is invalid');
@@ -225,10 +234,11 @@ if (typeof process === 'object') (function()
 	}
 
 	// Experimental compile C files to WASM directly
-	if (cfiles.length)
+	if (cfiles.length || ld)
 	{
 		const pathToWajic = PathRelatedTo(process.cwd(), __dirname, true), pathToSystem = pathToWajic + 'system/';
-		inBytes = ExperimentalCompileWasm(p, outWasmPath, cfiles, cc, ld, pathToWajic, pathToSystem);
+		inBytes = ExperimentalCompile(p, cfiles, cc, ld, pathToWajic, pathToSystem, outWasmPath, outObjPath, outBcPath);
+		if (outObjPath || outBcPath) return console.log('  [SAVED] ' + (outObjPath || outBcPath) + ' (' + fs.statSync(outObjPath || outBcPath).size + ' bytes)');
 	}
 
 	// Calculate relative paths (HTML -> JS -> WASM)
@@ -1579,7 +1589,7 @@ function DecodeRLE85(str)
 	return trg;
 }
 
-function ExperimentalCompileWasm(p, wasmPath, cfiles, ccAdd, ldAdd, pathToWajic, pathToSystem)
+function ExperimentalCompile(p, cfiles, ccAdd, ldAdd, pathToWajic, pathToSystem, outWasmPath, outObjPath, outBcPath)
 {
 	const fs = require('fs'), child_process = require('child_process');
 
@@ -1639,12 +1649,13 @@ function ExperimentalCompileWasm(p, wasmPath, cfiles, ccAdd, ldAdd, pathToWajic,
 	var ldArgs = (wantDebug ? [] : ['-strip-all']);
 	ldArgs.push('-gc-sections', '-no-entry', '-allow-undefined', '-export=__wasm_call_ctors', '-export=main', '-export=__original_main', '-export=__main_argc_argv', '-export=__main_void', '-export=malloc', '-export=free', pathToSystem+'system.bc');
 	if (p.stacksize) { ldArgs.push('-z', 'stack-size=' + p.stacksize); }
+	if (outBcPath) { outWasmPath = outBcPath; ldArgs = ['-r']; }
 	ldArgs = ldArgs.concat(ldAdd.trim().split(/\s+/));
 
 	var procs = [];
 	cfiles.forEach((f,i) =>
 	{
-		var isC = (f.match(/\.c$/i)), outPath = GetTempPath(f.match(/([^\/\\]*?)\.[^\.\/\\]+$/)[1], 'o');
+		var isC = (f.match(/\.c$/i)), outPath = outObjPath || GetTempPath(f.match(/([^\/\\]*?)\.[^\.\/\\]+$/)[1], 'o');
 		var args = ccArgs.concat(hasX ? [] : ['-x', (isC ? 'c' : 'c++')]).concat(hasStd ? [] : ['-std=' + (isC ? 'c99' : 'c++11')]);
 		if (!wantRtti && !isC) args.push('-fno-rtti');
 		args.push('-o', outPath, f);
@@ -1653,34 +1664,36 @@ function ExperimentalCompileWasm(p, wasmPath, cfiles, ccAdd, ldAdd, pathToWajic,
 		ldArgs.push(outPath);
 	});
 	WaitProcs(procs);
+	if (outObjPath) return;
 
 	console.log('  [LINKING] Linking files: ' + cfiles.join(', ') + ' ...');
-	if (!wasmPath) wasmPath = GetTempPath('out', 'wasm');
-	ldArgs.push('-o', wasmPath);
+	if (!outWasmPath) outWasmPath = GetTempPath('out', 'wasm');
+	ldArgs.push('-o', outWasmPath);
 	Run(ldCmd, ldArgs, "LINKING");
+	if (outBcPath) return;
 
 	p.RunWasmOpt = function(unused_malloc, unused_free, use_asyncify)
 	{
 		if (unused_malloc || unused_free) p.wasm = WasmFilterExports(p.wasm, {malloc:unused_malloc,free:unused_free});
 		if (wantDebug && !use_asyncify) return;
-		fs.writeFileSync(wasmPath, p.wasm);
+		fs.writeFileSync(outWasmPath, p.wasm);
 		if (use_asyncify)
 		{
-			var wasmOptArgs = ['--asyncify', wasmPath, '-o', wasmPath ];
+			var wasmOptArgs = ['--asyncify', outWasmPath, '-o', outWasmPath ];
 			if (wantDebug) wasmOptArgs.push('--legalize-js-interface', '-g');
 			Run(wasmOptCmd, wasmOptArgs, "WASMOPT");
 		}
 		if (!wantDebug)
 		{
 			// adding '--ignore-implicit-traps' would be nice but it can break programs with '-Os'(see issue binaryen-2824)
-			var wasmOptArgs = ['--legalize-js-interface', '--low-memory-unused', '--converge', '-Os', wasmPath, '-o', wasmPath ];
+			var wasmOptArgs = ['--legalize-js-interface', '--low-memory-unused', '--converge', '-Os', outWasmPath, '-o', outWasmPath ];
 			Run(wasmOptCmd, wasmOptArgs, "WASMOPT");
 		}
-		p.wasm = new Uint8Array(fs.readFileSync(wasmPath));
+		p.wasm = new Uint8Array(fs.readFileSync(outWasmPath));
 	};
 
-	try { var buf = fs.readFileSync(wasmPath); } catch (e) { return ABORT('Failed to load file: ' + wasmPath, e); }
-	console.log('  [LOADED] ' + wasmPath + ' (' + buf.length + ' bytes)');
+	try { var buf = fs.readFileSync(outWasmPath); } catch (e) { return ABORT('Failed to load file: ' + outWasmPath, e); }
+	console.log('  [LOADED] ' + outWasmPath + ' (' + buf.length + ' bytes)');
 	return new Uint8Array(buf);
 }
 
