@@ -79,7 +79,7 @@ For example, to build the basic sample, run this command to create Basic.wasm:
 The built .wasm file can be loaded in the [WAjic viewer](https://wajic.github.io/viewer/) or via Node.js CLI `node wajic.js Basic.wasm`.
 
 This only builds raw C/C++ applications without the C/C++ standard libraries or dynamic memory allocations.  
-To get support for these system libraries, just download the [pre-built system libraries and headers](https://github.com/schellingb/wajic/releases/download/bin/wajic_system_20200505.zip) and put it into the wajic directory.
+To get support for these system libraries, just download the [pre-built system libraries and headers](https://github.com/schellingb/wajic/releases/tag/bin) and put it into the wajic directory.
 
 Once you have the system files some more arguments need to be added to the build command.  
 Now we can build the rest of the samples, for example the WebGL sample, with:
@@ -387,13 +387,13 @@ Then to link the object files together into one .wasm file, call the linker wasm
 `wasm-ld -strip-all -gc-sections -no-entry -allow-undefined ./system/system.bc -export=__wasm_call_ctors -export=main -export=malloc -export=free WebGL.o -o WebGL.wasm`
 
 ### Manually Building System Libraries
-The system libraries and headers are provided as a [download on this repository](https://github.com/schellingb/wajic/releases/download/bin/wajic_system_20200505.zip).
+Prebuilt system libraries and headers are provided as a [download on this repository](https://github.com/schellingb/wajic/releases/tag/bin).
 
 To build them yourself you can use the provided GNU make file.
 
-1. Getting System Libraries  
-The system libraries (libc/libcxx prepared for WASM) are maintained in the [Emscripten project](https://github.com/emscripten-core/emscripten/tree/master/system).  
-Just download its [GitHub master archive](https://github.com/emscripten-core/emscripten/archive/master.zip) and extract only the `system` directory from it.
+1. Getting System Library Sources  
+The system libraries (libc/libcxx prepared for WASM) are maintained in the [Emscripten project](https://github.com/emscripten-core/emscripten/tree/main/system).  
+Just download its [GitHub main archive](https://github.com/emscripten-core/emscripten/archive/refs/heads/main.zip) and extract only the `system` directory from it.
 
 2. Getting GNU Make  
 If you're on Windows, GNU Make is a small 180 KB EXE file which you can get [here](https://github.com/schellingb/ZillaLib/raw/master/Tools/make.exe).  
@@ -431,10 +431,10 @@ This makes it possible to debug through the native code and have breakpoints in 
 
 ## Missing Features
 At this point in time, WAjic has no support for the following features:
- * Threads (or posix thread emulation)
+ * Threads (or posix thread emulation) *[Coroutines](#coroutines) might be an alternative
+ * setjmp/longjmp *[Coroutines](#coroutines) might be an alternative
+ * Full Filesystem emulation *[Embedding Files](#embedding-files) supports file access
  * C++ exceptions
- * setjmp/longjmp
- * Filesystem emulation
  * TCP socket emulation
  * SIMD
 
