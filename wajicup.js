@@ -207,7 +207,6 @@ if (typeof process === 'object') (function()
 	if (outObjPath || outBcPath)
 	{
 		if (outObjPath && outBcPath) return ArgErr('Unable to output both .o and .bc files');
-		for (var i = 0; i != args.length; i++) if (args[i].match(/^-[^cv]/)) return ArgErr('Invalid argument for .o or .bc output: ' + args[i]);
 		if (outObjPath && (inBytes || cfiles.length != 1 || outWasmPath || outJsPath || outHtmlPath)) return ArgErr('When outputting a .o file, there must be exactly one .c file as input');
 		if (outBcPath && (inBytes || cfiles.length == 0 || outWasmPath || outJsPath || outHtmlPath)) return ArgErr('When outputting a .bc file, there must be only .c files as input');
 	}
@@ -728,6 +727,7 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 function GenerateJsImports(mods, libs)
 {
 	const has_libs = (Object.keys(libs).length != 0);
+	const has_sysopen = (mods.env.__sys_open || mods.env.__syscall_open);
 	var imports = '';
 
 	if (has_libs)
@@ -849,10 +849,10 @@ function GenerateJsImports(mods, libs)
 					if (fld[0] == 'g') imports += '		getTempRet0: () => TEMP,' + "\n";
 					if (fld[0] == 's') imports += '		setTempRet0: i => TEMP = i,' + "\n";
 				}
-				else if (fld == '__sys_open')
+				else if (fld == '__sys_open' || fld == '__syscall_open')
 				{
 					imports += '\n		// file open (can only be used to open embedded files)' + "\n";
-					imports += '		__sys_open: function(path, flags, varargs)' + "\n";
+					imports += '		' + fld + ': function(path, flags, varargs)' + "\n";
 					imports += '		{' + "\n";
 					imports += '			//console.log(\'__sys_open: path: \' + MStrGet(path) + \' - flags: \' + flags + \' - mode: \' + MU32[varargs>>2]);' + "\n";
 					imports += '			var section = WebAssembly.Module.customSections(WA.wm, \'|\'+MStrGet(path))[0];' + "\n";
@@ -860,7 +860,7 @@ function GenerateJsImports(mods, libs)
 					imports += '			return FPTS.push(new Uint8Array(section), 0) - 2;' + "\n";
 					imports += '		},' + "\n";
 				}
-				else if ((fld == '__sys_fcntl64' || fld == '__sys_ioctl') && mods.env.__sys_open)
+				else if ((fld == '__sys_fcntl64' || fld == '__sys_ioctl' || fld == '__syscall_fcntl64' || fld == '__syscall_ioctl') && has_sysopen)
 				{
 					imports += '		' + fld + ': () => 0, // does nothing in this wasm context' + "\n";
 				}
@@ -895,7 +895,7 @@ function GenerateJsImports(mods, libs)
 					imports += '			return 0; // no error' + "\n";
 					imports += '		},' + "\n";
 				}
-				else if (fld == 'fd_read' && mods.env.__sys_open)
+				else if (fld == 'fd_read' && has_sysopen)
 				{
 					imports += '\n		// The fd_read function can only be used to read data from embedded files in this wasm context' + "\n";
 					imports += '		fd_read: function(fd, iov, iovcnt, pOutResult)' + "\n";
@@ -918,7 +918,7 @@ function GenerateJsImports(mods, libs)
 					imports += '			return 0;' + "\n";
 					imports += '		},' + "\n";
 				}
-				else if (fld == 'fd_seek' && mods.env.__sys_open)
+				else if (fld == 'fd_seek' && has_sysopen)
 				{
 					imports += '\n		// The fd_seek function can only be used to seek in embedded files in this wasm context' + "\n";
 					imports += '		fd_seek: function(fd, offset_low, offset_high, whence, pOutResult) //seek in payload' + "\n";
@@ -936,7 +936,7 @@ function GenerateJsImports(mods, libs)
 					imports += '			return 0;' + "\n";
 					imports += '		},' + "\n";
 				}
-				else if (fld == 'fd_close' && mods.env.__sys_open)
+				else if (fld == 'fd_close' && has_sysopen)
 				{
 					imports += '\n		// The fd_close clears an opened file buffer' + "\n";
 					imports += '		fd_close: function(fd)' + "\n";
@@ -1058,7 +1058,7 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 	var has_free = !!exports.free;
 	var use_sbrk = !!mods.env.sbrk;
 	var use_wasi = (Object.keys(mods).join('|')).includes('wasi');
-	var use_fpts = (use_wasi && mods.env.__sys_open);
+	var use_fpts = (use_wasi && (mods.env.__sys_open || mods.env.__syscall_open));
 	var use_MStrPut = imports.match(/\bMStrPut\b/);
 	var use_MStrAlloc = (use_MStrPut && imports.match(/\bMStrPut\([^,\)]+\)/));
 	var use_MStrGet = imports.match(/\bMStrGet\b/) || use_wasi || mods.env.__assert_fail;
