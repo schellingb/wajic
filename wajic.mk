@@ -133,7 +133,8 @@ endef
 #------------------------------------------------------------------------------------------------------
 #if system.bc exists, don't even bother checking sources, build once and forget for now
 ifeq ($(if $(wildcard $(WAJIC_ROOT)system/system.bc),1,0),0)
-SYS_ADDS := emmalloc.c libcxxabi/src/cxa_guard.cpp compiler-rt/lib/builtins/*.c libc/wasi-helpers.c pthread/library_pthread_stub.c pthread/pthread_self_stub.c
+SYS_ADDS := emmalloc.c libcxxabi/src/cxa_guard.cpp compiler-rt/lib/builtins/*.c libc/wasi-helpers.c pthread/library_pthread_stub.c
+SYS_ADDS += $(if $(wildcard $(SYSTEM_ROOT)/lib/pthread/pthread_self_stub.c),pthread/pthread_self_stub.c) # due to change in 2.0.32
 SYS_ADDS += $(if $(wildcard $(SYSTEM_ROOT)/lib/libc/emscripten_pthread.c),libc/emscripten_pthread.c) # needed for 2.0.13 until 2.0.25
 SYS_ADDS += libcxx/$(if $(wildcard $(SYSTEM_ROOT)/lib/libcxx/src/*.cpp),src/)*.cpp # due to change in 2.0.13
 SYS_MUSL := complex crypt ctype dirent errno fcntl fenv internal locale math misc mman multibyte prng regex select stat stdio stdlib string termios unistd
