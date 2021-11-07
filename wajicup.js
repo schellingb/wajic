@@ -173,6 +173,8 @@ if (typeof process === 'object') (function()
 		if (arg.match(/^-?\/?node$/i))         { p.node      = true;  continue; }
 		if (arg.match(/^-?\/?gzipreport$/i))   { gzipReport  = true;  continue; }
 		if (arg.match(/^-?\/?(v|verbose)$/i))  { verbose     = true;  continue; }
+		if (arg.match(/^-?\/?args$/i))         { p.args      = ['W']; continue; }
+		if (arg.match(/^-?\/?arg$/i))          { (p.args||(p.args=[])).push(args[i++]); continue; }
 		if (arg.match(/^-?\/?embed$/i))        { AddEmbed(args[i], args[i+1]); i += 2; continue; }
 		if (arg.match(/^-?\/?template$/i))     { p.template = Load(args[i++]); continue; }
 		if (arg.match(/^-?\/?stacksize$/i))    { p.stacksize = (args[i++]|0); continue; }
@@ -289,22 +291,23 @@ function IsWasmFile(inBytes)
 function GenerateHtml(p)
 {
 	VERBOSE('    [HTML] Generate - Log: ' + p.log + ' - Canvas: ' + p.use_canvas + (p.jsPath ? ' - JS: ' + p.jsPath : '') + (p.wasmPath ? ' - WASM: ' + p.wasmPath : '') + (p.template ? ' - USING TEMPLATE' : ''));
+	var both = (p.jsPath && p.wasmPath);
 	if (p.template)
 	{
-		var template = ReadUTF8String(p.template);
-		if (p.use_canvas && !template.match(/\bwa_canvas\b/)) ABORT('Template is missing wa_canvas element');
-		if (!p.jsPath && !template.match(/{{{js}}}/)) ABORT('Template is missing {{{js}}} tag to insert generated output - Example:\n<script>"use strict";' + "\n" + (p.meta ? p.meta : '') + '{{{js}}}\n</'+'script>');
-		if (p.jsPath && !template.match(/{{{jsPath}}}/)) ABORT('Template is missing {{{jsPath}}} tag to insert path to javascript file - Example:\n<script defer src="{{{jsPath}}}"></'+'script>');
-		if (p.wasmPath && !template.match(/{{{wasmPath}}}/)) ABORT('Template is missing {{{wasmPath}}} tag to insert path to wasm file - Example:\n' + (p.jsPath ? '<script defer src="{{{jsPath}}}" data-wasm="{{{wasmPath}}}"></'+'script>' : 'WA.module = "{{{wasmPath}}}";'));
-		if (p.jsPath && template.match(/{{{js}}}/)) ABORT('Template has unused {{{js}}} tag to insert generated output, it needs to be removed');
-		if (!p.jsPath && template.match(/{{{jsPath}}}/)) ABORT('Template has unused {{{jsPath}}} tag to insert path to javascript file, it needs to be removed');
-		if (!p.wasmPath && template.match(/{{{wasmPath}}}/)) ABORT('Template has unused {{{wasmPath}}} tag to insert path to wasm file, it needs to be removed');
-		if (!p.jsPath) template = template.replace(/{{{js}}}/, p.js);
+		var template = ReadUTF8String(p.template), js = [], indent = (template.match(/\n([\t ]+){{{js}}}/)||[])[1]||'';
+		if (p.wasmPath && !p.jsPath) js.push('WA.module = "{{{wasmPath}}}";');
+		if (p.args)                  js.push('WA.args = ' + p.args + ';');
+		if (!p.jsPath)               js.push(p.js.trimEnd());
+		if (p.use_canvas && !template.match(/\bwa_canvas\b/ )) ABORT('Template is missing wa_canvas element');
+		if (both         && !template.match(/{{{wasmPath}}}/)) ABORT('Template is missing {{{wasmPath}}} tag to insert path to wasm file - Example:\n<script defer src="{{{jsPath}}}" data-wasm="{{{wasmPath}}}"></'+'script>');
+		if (p.jsPath     && !template.match(/{{{jsPath}}}/  )) ABORT('Template is missing {{{jsPath}}} tag to insert path to javascript file - Example:\n<script defer src="{{{jsPath}}}"></'+'script>');
+		if (js.length    && !template.match(/{{{js}}}/      )) ABORT('Template is missing {{{js}}} tag to insert generated output - Example:\n<script>"use strict";' + "\n" + (p.meta ? p.meta : '') + '{{{js}}}\n</'+'script>');
+		if (!p.jsPath    &&  template.match(/{{{jsPath}}}/  )) ABORT('Template has unused {{{jsPath}}} tag to insert path to javascript file, it needs to be removed');
+		if (!both        &&  template.match(/{{{wasmPath}}}/)) ABORT('Template has unused {{{wasmPath}}} tag to insert path to wasm file, it needs to be removed');
 		if (p.jsPath) template = template.replace(/{{{jsPath}}}/, p.jsPath);
 		if (p.wasmPath) template = template.replace(/{{{wasmPath}}}/, p.wasmPath);
-		return template;
+		return template.replace(/{{{js}}}/, js.join("\n"+indent));
 	}
-	var both = (p.jsPath && p.wasmPath);
 	return '<!doctype html>' + "\n"
 		+ '<html lang="en-us">' + "\n"
 		+ (p.loadbar ? ''
@@ -338,6 +341,7 @@ function GenerateHtml(p)
 				+ "	}," + "\n"
 				+ (p.log ? "	print: text => document.getElementById('wa_log').innerHTML += text.replace(/\\n/g, '<br>')," + "\n"
 				         + "	started: () => WA.print('started\\n')," + "\n" : '')
+				+ (p.args ? "	args: " + p.args + "," + "\n" : '')
 			+ '};' + "\n"
 			+ "(()=>{" + "\n"
 			+ "var progress = document.getElementById('wa_progress'), progressbar = progress.firstElementChild;" + "\n"
@@ -390,13 +394,18 @@ function GenerateHtml(p)
 		+ '</html>' + "\n";
 }
 
+function CharEscape(m)
+{
+	return "\\"+(m=='\0'?'0':m=='\t'?'t':m=='\n'?'n':m=='\v'?'v':m=='\f'?'f':m=='\r'?'r':m=="'"?"'":"x"+escape(m).slice(1));
+}
+
 function FinalizeJs(p)
 {
 	VERBOSE('    [JS] Finalize - EmbedJS: ' + !p.jsPath + ' - Minify: ' + p.minify + ' - EmbedWASM: ' + !p.wasmPath);
 	var res = (p.jsPath ? '"use strict";' : '');
-	if (p.loadbar && p.wasmPath) res += 'WA.loaded = function(wasm){';
-	else res += (p.jsPath ? 'var WA = WA||{' + (p.wasmPath ? 'module:\'' + p.wasmPath + '\'' : '') + '};' : '') + '(function(){';
-	res += "\n\n";
+	if (p.loadbar && p.wasmPath) res += 'WA.loaded = function(wasm){' + "\n\n";
+	else res += (p.jsPath ? 'var WA = WA||{' + (p.wasmPath ? 'module:\'' + p.wasmPath + '\'' : '') + '};' : '') + '(function(){' + "\n\n";
+	if (p.args) { var args = ''; p.args.forEach((a) => args += (args ? ', ' : '[') + "'" + a.replace(/[\0-\37\']/g, CharEscape) + "'"); p.args = args + ']'; }
 	if (p.minify && !p.jsPath && !p.loadbar && !p.template)
 	{
 		// pre-declare all variables for minification
@@ -405,8 +414,9 @@ function FinalizeJs(p)
 				+ 'var WA_canvas' + (p.use_canvas ? ' = document.getElementById(\'wa_canvas\')' : '') + ';' + "\n"
 				+ 'var WA_print'   + (p.log ? ' = text => document.getElementById(\'wa_log\').innerHTML += text.replace(/\\n/g, \'<br>\')' : ' = t=>{}') + ';' + "\n"
 				+ 'var WA_error'   + (p.log ? ' = (code, msg) => WA_print(\'ERROR: \' + code + \' - \' + msg + \'\\n\')'                   : ' = m=>{}') + ';' + "\n"
-				+ 'var WA_started' + (p.log ? ' = () => WA_print(\'started\\n\')' : '') + ';' + "\n\n";
-		res += 'var print = WA_print, error = WA_error;' + "\n\n";
+				+ 'var WA_started' + (p.log ? ' = () => WA_print(\'started\\n\')' : '') + ';' + "\n"
+				+ 'var WA_args' + (p.args ? ' = ' + p.args : '') + ';' + "\n"
+				+ 'var print = WA_print, error = WA_error;' + "\n\n";
 	}
 	else
 	{
@@ -417,6 +427,7 @@ function FinalizeJs(p)
 				         + '	error: (code, msg) => WA.print(\'ERROR: \' + code + \' - \' + msg + \'\\n\'),' + "\n"
 				         + '	started: () => WA.print(\'started\\n\'),' + "\n"
 				    : '')
+				+ (p.args && !p.template ? '	args: ' + p.args + ',' + "\n" : '')
 				+ '};' + "\n";
 
 		res += '// Define print and error functions if not yet defined by the outer html file' + "\n";
@@ -684,19 +695,29 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 	}
 	if ((exports.main || exports.__main_argc_argv) && exports.malloc)
 	{
-		body += '	// Allocate 10 bytes of memory to store the argument list with 1 entry to pass to main' + "\n";
-		body += '	var ptr = ASM.malloc(10);' + "\n\n";
+		if (p.args)
+		{
+			body += '	// Store program arguments and the argv list in memory' + "\n";
+			body += '	var args = WA.args||[\'W\'], argc = args.length, argv = ASM.malloc((argc+1)<<2), i;' + "\n";
+			body += '	for (i = 0; i != argc; i++) MU32[(argv>>2)+i] = MStrPut(args[i]);' + "\n";
+			body += '	MU32[(argv>>2)+argc] = 0; // list terminating null pointer' + "\n\n";
+		}
+		else
+		{
+			body += '	// Allocate 10 bytes of memory to store the argument list with 1 entry to pass to main' + "\n";
+			body += '	var argc = 1, argv = ASM.malloc(10);' + "\n\n";
 
-		body += '	// Place executable name string "W" after the argv list' + "\n";
-		body += '	MU8[ptr+8] = 87;' + "\n";
-		body += '	MU8[ptr+9] = 0;' + "\n\n";
+			body += '	// Place executable name string "W" after the argv list' + "\n";
+			body += '	MU8[argv+8] = 87;' + "\n";
+			body += '	MU8[argv+9] = 0;' + "\n\n";
 
-		body += '	// argv[0] contains the pointer to the executable name string, argv[1] has a list terminating null pointer' + "\n";
-		body += '	MU32[(ptr    )>>2] = (ptr + 8)' + "\n";
-		body += '	MU32[(ptr + 4)>>2] = 0;' + "\n\n";
+			body += '	// argv[0] contains the pointer to the executable name string, argv[1] has a list terminating null pointer' + "\n";
+			body += '	MU32[(argv    )>>2] = (argv + 8)' + "\n";
+			body += '	MU32[(argv + 4)>>2] = 0;' + "\n\n";
+		}
 
-		if (exports.main) body += '	ASM.main(1, ptr);' + "\n";
-		if (exports.__main_argc_argv) body += '	ASM.__main_argc_argv(1, ptr);' + "\n";
+		if (exports.main) body += '	ASM.main(argc, argv);' + "\n";
+		if (exports.__main_argc_argv) body += '	ASM.__main_argc_argv(argc, argv);' + "\n";
 		body += "\n";
 	}
 	if (((exports.main || exports.__main_argc_argv) && !exports.malloc) || exports.__original_main || exports.__main_void)
@@ -1059,7 +1080,7 @@ function VerifyWasmLayout(exports, mods, imports, use_memory, p)
 	var use_sbrk = !!mods.env.sbrk;
 	var use_wasi = (Object.keys(mods).join('|')).includes('wasi');
 	var use_fpts = (use_wasi && (mods.env.__sys_open || mods.env.__syscall_open));
-	var use_MStrPut = imports.match(/\bMStrPut\b/);
+	var use_MStrPut = imports.match(/\bMStrPut\b/) || (has_main_with_args && has_malloc && p.args);
 	var use_MStrAlloc = (use_MStrPut && imports.match(/\bMStrPut\([^,\)]+\)/));
 	var use_MStrGet = imports.match(/\bMStrGet\b/) || use_wasi || mods.env.__assert_fail;
 	var use_MArrPut = imports.match(/\bMArrPut\b/);
@@ -1291,7 +1312,6 @@ function WasmProcessImports(wasm, logImports, callbackImportMod, callbackImportJ
 		if (type != 2) continue;
 
 		//Section 2 'Imports' contains the list of JavaScript functions imported by the wasm module
-		function CharEscape(m) { return "\\"+(m=='\0'?'0':m=='\t'?'t':m=='\n'?'n':m=='\v'?'v':m=='\f'?'f':m=='\r'?'r':"x"+escape(m).slice(1)); }
 		if (callbackImportsStart) callbackImportsStart(iSectionBeforeLength, i);
 		for (let count = Get(), j = 0, mod, fld, iModEnd, iFldEnd, knd; j != count && i < iSectionEnd; j++)
 		{
