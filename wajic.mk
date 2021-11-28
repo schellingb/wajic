@@ -86,7 +86,7 @@ FLAGS := $(subst \\\, ,$(foreach F,$(subst \ ,\\\,$(D)),"-D$(F)"))
 SOURCES := $(if $(SRC),$(wildcard $(SRC)),$(wildcard *.c *.cpp *.cc))
 -include sources.mk
 SOURCES += $(foreach F, $(ADD_SOURCES), $(wildcard $(F)))
-ifeq ($(SOURCES),)
+ifeq ($(strip $(SOURCES))$(filter %system.bc,$(MAKECMDGOALS)),)
   $(error No source files found for build)
 endif
 OUTBASE := $(OUTDIR)/$(if $(SRC),$(basename $(notdir $(firstword $(SRC)))),output)
