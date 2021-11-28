@@ -305,18 +305,12 @@ if (!load)
 	// If function 'main' exists, call it
 	if (main && malloc)
 	{
-		// Allocate 10 bytes of memory to store the argument list with 1 entry to pass to main
-		var ptr = malloc(10);
+		// Store program arguments and the argv list in memory
+		var args = WA.args||['W'], argc = args.length, argv = malloc((argc+1)<<2), i;
+		for (i = 0; i != argc; i++) MU32[(argv>>2)+i] = MStrPut(args[i]);
+		MU32[(argv>>2)+argc] = 0; // list terminating null pointer
 
-		// Place executable name string "W" after the argv list
-		MU8[ptr+8] = 87;
-		MU8[ptr+9] = 0;
-
-		// argv[0] contains the pointer to the executable name string, argv[1] has a list terminating null pointer
-		MU32[(ptr    )>>2] = (ptr + 8)
-		MU32[(ptr + 4)>>2] = 0;
-
-		main(1, ptr);
+		main(argc, argv);
 	}
 	else if (main)
 	{
