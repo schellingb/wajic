@@ -133,7 +133,8 @@ endef
 #------------------------------------------------------------------------------------------------------
 #if system.bc exists, don't even bother checking sources, build once and forget for now
 ifeq ($(if $(wildcard $(WAJIC_ROOT)system/system.bc),1,0),0)
-SYS_ADDS := emmalloc.c libcxxabi/src/cxa_guard.cpp compiler-rt/lib/builtins/*.c libc/wasi-helpers.c pthread/library_pthread_stub.c
+SYS_ADDS := libcxxabi/src/cxa_guard.cpp compiler-rt/lib/builtins/*.c libc/wasi-helpers.c pthread/library_pthread_stub.c
+SYS_ADDS += $(if $(wildcard $(SYSTEM_ROOT)/lib/emmalloc.c),emmalloc.c,emmalloc.cpp) # due to change in 2.0.27
 SYS_ADDS += $(if $(wildcard $(SYSTEM_ROOT)/lib/pthread/pthread_self_stub.c),pthread/pthread_self_stub.c) # due to change in 2.0.32
 SYS_ADDS += $(if $(wildcard $(SYSTEM_ROOT)/lib/libc/emscripten_pthread.c),libc/emscripten_pthread.c) # needed for 2.0.13 until 2.0.25
 SYS_ADDS += libcxx/$(if $(wildcard $(SYSTEM_ROOT)/lib/libcxx/src/*.cpp),src/)*.cpp # due to change in 2.0.13
@@ -143,8 +144,9 @@ SYS_MUSL := complex crypt ctype dirent errno fcntl fenv internal locale math mis
 # Threads and exceptions are not supported, C++ streams and locale are not included on purpose because it can increase the output up to 500kb
 SYS_IGNORE := thread.cpp exception.cpp
 SYS_IGNORE += iostream.cpp strstream.cpp locale.cpp  #comment out if you need C++ streams and locale
-SYS_IGNORE += abs.c acos.c acosf.c acosl.c asin.c asinf.c asinl.c atan.c atan2.c atan2f.c atan2l.c atanf.c atanl.c ceil.c ceilf.c ceill.c cos.c cosf.c cosl.c exp.c expf.c expl.c 
-SYS_IGNORE += fabs.c fabsf.c fabsl.c floor.c floorf.c floorl.c log.c logf.c logl.c pow.c powf.c powl.c rintf.c round.c roundf.c sin.c sinf.c sinl.c sqrt.c sqrtf.c sqrtl.c tan.c tanf.c tanl.c
+SYS_IGNORE += abs.c acos.c acosf.c acosl.c asin.c asinf.c asinl.c atan.c atan2.c atan2f.c atan2l.c atanf.c atanl.c ceil.c ceilf.c ceill.c cos.c cosf.c cosl.c exp.c expf.c expl.c
+SYS_IGNORE += fabs.c fabsf.c fabsl.c floor.c floorf.c floorl.c pow.c powf.c powl.c rintf.c round.c roundf.c sin.c sinf.c sinl.c sqrt.c sqrtf.c sqrtl.c tan.c tanf.c tanl.c
+SYS_IGNORE += log.c log_data.c log_small.c logf.c logf_data.c logl.c log10.c log10f.c log10l.c log1p.c log1pf.c log1pl.c log2.c log2_data.c log2_small.c log2f.c log2f_data.c log2l.c
 SYS_IGNORE += syscall.c wordexp.c initgroups.c getgrouplist.c popen.c _exit.c alarm.c usleep.c faccessat.c iconv.c
 SYS_IGNORE += gcc_personality_v0.c # 1.39.20 and newer only
 
@@ -169,14 +171,19 @@ SYS_CXXFLAGS += -DNDEBUG -D_LIBCPP_BUILDING_LIBRARY -D_LIBCPP_DISABLE_VISIBILITY
 
 SYS_CFLAGS := -x c -Os -std=gnu11 -fno-threadsafe-statics -fno-builtin
 SYS_CFLAGS += -DNDEBUG -Dunix -D__unix -D__unix__ -D_XOPEN_SOURCE
+SYS_CFLAGS += -Wno-dangling-else -Wno-ignored-attributes -Wno-bitwise-op-parentheses -Wno-logical-op-parentheses -Wno-shift-op-parentheses
+SYS_CFLAGS += -Wno-string-plus-int -Wno-unknown-pragmas -Wno-ignored-pragmas -Wno-shift-count-overflow -Wno-return-type -Wno-macro-redefined
+SYS_CFLAGS += -Wno-unused-result -Wno-pointer-sign -Wno-implicit-function-declaration -Wno-int-conversion
 SYS_CFLAGS += -isystem$(SYSTEM_ROOT)/lib/libc/musl/src/internal
-SYS_CFLAGS += -Wno-dangling-else -Wno-ignored-attributes -Wno-bitwise-op-parentheses -Wno-logical-op-parentheses -Wno-shift-op-parentheses -Wno-string-plus-int
-SYS_CFLAGS += -Wno-unknown-pragmas -Wno-shift-count-overflow -Wno-return-type -Wno-macro-redefined -Wno-unused-result -Wno-pointer-sign -Wno-implicit-function-declaration
 
-SYS_CPP_OBJS := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst %.cpp,%.o,$(filter %.cpp,$(SYS_SOURCES)))))
-SYS_CC_OBJS  := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst   %.c,%.o,$(filter   %.c,$(SYS_SOURCES)))))
-$(SYS_CPP_OBJS) : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst $(SYS_TEMP)/%.o,$(SYSTEM_ROOT)/lib/%.cpp,$@)),$(CC),$(SYS_CXXFLAGS))
-$(SYS_CC_OBJS)  : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst $(SYS_TEMP)/%.o,$(SYSTEM_ROOT)/lib/%.c,$@)),$(CC),$(SYS_CFLAGS))
+SYS_MUSLFLAGS := -isystem$(SYSTEM_ROOT)/lib/libc/musl/src/include
+
+SYS_MUSL_OBJS := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst   %.c,%.o,$(filter libc/musl/%,$(SYS_SOURCES)) $(filter pthread/%,$(SYS_SOURCES)))))
+SYS_CC_OBJS   := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst   %.c,%.o,$(filter   %.c,$(filter-out pthread/%,$(filter-out libc/musl/%,$(SYS_SOURCES)))))))
+SYS_CPP_OBJS  := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst %.cpp,%.o,$(filter %.cpp,$(filter-out pthread/%,$(filter-out libc/musl/%,$(SYS_SOURCES)))))))
+$(SYS_MUSL_OBJS) : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst $(SYS_TEMP)/%.o,$(SYSTEM_ROOT)/lib/%.c,$@)),$(CC),$(SYS_CFLAGS) $(SYS_MUSLFLAGS))
+$(SYS_CC_OBJS)   : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst $(SYS_TEMP)/%.o,$(SYSTEM_ROOT)/lib/%.c,$@)),$(CC),$(SYS_CFLAGS))
+$(SYS_CPP_OBJS)  : ; $(call SYS_COMPILE,$@,$(subst !,/,$(patsubst $(SYS_TEMP)/%.o,$(SYSTEM_ROOT)/lib/%.cpp,$@)),$(CC),$(SYS_CXXFLAGS))
 
 define SYS_COMPILE
 	$(info $2)
@@ -184,7 +191,7 @@ define SYS_COMPILE
 	@$3 $4 $(CLANGFLAGS) -o $1 $2
 endef
 
-$(WAJIC_ROOT)system/system.bc : $(SYS_CPP_OBJS) $(SYS_CC_OBJS)
+$(WAJIC_ROOT)system/system.bc : $(SYS_MUSL_OBJS) $(SYS_CPP_OBJS) $(SYS_CC_OBJS)
 	$(info Creating archive $@ ...)
 	@$(if $(wildcard $(dir $@)),,$(shell mkdir "$(dir $@)"))
 	@$(LD) $(if $(ISWIN),"$(SYS_TEMP)/*.o",$(SYS_TEMP)/*.o) -r -o $@
