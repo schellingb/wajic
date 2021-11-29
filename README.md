@@ -84,7 +84,7 @@ To get support for these system libraries, just download the [pre-built system l
 Once you have the system files some more arguments need to be added to the build command.  
 Now we can build the rest of the samples, for example the WebGL sample, with:
 
-`clang -isystem./system/include/libcxx -isystem./system/include/compat -isystem./system/include -isystem./system/include/libc -isystem./system/lib/libc/musl/arch/emscripten -Xlinker ./system/system.bc -D__EMSCRIPTEN__ -D_LIBCPP_ABI_VERSION=2 -I. -Os -target wasm32 -nostartfiles -nodefaultlibs -nostdinc -nostdinc++ -Wno-unused-command-line-argument -DNDEBUG -D__WAJIC__ -fvisibility=hidden -fno-rtti -fno-exceptions -fno-threadsafe-statics -Xlinker -strip-all -Xlinker -gc-sections -Xlinker -no-entry -Xlinker -allow-undefined -Xlinker -export=__wasm_call_ctors -Xlinker -export=main -export=malloc -export=free samples/WebGL.c -o WebGL.wasm`
+`clang -isystem./system/include/libcxx -isystem./system/lib/libcxx/include -isystem./system/include/compat -isystem./system/include -isystem./system/include/libc -isystem./system/lib/libc/musl/include -isystem./system/lib/libc/musl/arch/emscripten -isystem./system/lib/libc/musl/arch/generic -Xlinker ./system/system.bc -D__EMSCRIPTEN__ -D_LIBCPP_ABI_VERSION=2 -I. -Os -target wasm32 -nostartfiles -nodefaultlibs -nostdinc -nostdinc++ -Wno-unused-command-line-argument -DNDEBUG -D__WAJIC__ -fvisibility=hidden -fno-rtti -fno-exceptions -fno-threadsafe-statics -Xlinker -strip-all -Xlinker -gc-sections -Xlinker -no-entry -Xlinker -allow-undefined -Xlinker -export=__wasm_call_ctors -Xlinker -export=main -Xlinker -export=malloc -Xlinker -export=free samples/WebGL.c -o WebGL.wasm`
 
 With the .wasm file ready and tested in the [WAjic viewer](https://wajic.github.io/viewer/), we can go on further optimizing the result.
 
@@ -378,7 +378,7 @@ Sadly Firefox is not yet on the same level regarding debugging of functions gene
 ### Compiling and Linking Separately
 To build one of the samples by calling the compiler separately from the linker, first call clang for each source file to create an object file with .o extension:
 
-`clang -cc1 -triple wasm32 -emit-obj -fcolor-diagnostics -I. -isystem./system/include/libcxx -isystem./system/include/compat -isystem./system/include -isystem./system/include/libc -isystem./system/lib/libc/musl/arch/emscripten -fno-common -mconstructor-aliases -fvisibility hidden -fno-threadsafe-statics -fgnuc-version=4.2.1 -D__WAJIC__ -D__EMSCRIPTEN__ -D_LIBCPP_ABI_VERSION=2 -DNDEBUG -x c -std=c99 -Os samples/WebGL.c -o WebGL.o`
+`clang -cc1 -triple wasm32 -emit-obj -fcolor-diagnostics -I. -isystem./system/include/libcxx -isystem./system/lib/libcxx/include -isystem./system/include/compat -isystem./system/include -isystem./system/include/libc -isystem./system/lib/libc/musl/include -isystem./system/lib/libc/musl/arch/emscripten -isystem./system/lib/libc/musl/arch/generic -fno-common -mconstructor-aliases -fvisibility hidden -fno-threadsafe-statics -fgnuc-version=4.2.1 -D__WAJIC__ -D__EMSCRIPTEN__ -D_LIBCPP_ABI_VERSION=2 -DNDEBUG -x c -std=c99 -Os samples/WebGL.c -o WebGL.o`
 
 (For C++ you'd replace `-x c -std=c99` with `-x c++ -std=c++11 -fno-rtti`)
 
