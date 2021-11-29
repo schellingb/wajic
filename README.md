@@ -14,8 +14,10 @@ The output can be loaded in the WAjic viewer (available [online](https://wajic.g
   * [Setup](#setup)
     * [Getting WAjic](#getting-wajic)
     * [Getting LLVM](#getting-llvm)
-    * [Getting Node.js](#getting-node-js)
+    * [Getting Node.js](#getting-nodejs)
   * [Building an Application](#building-an-application)
+    * [Automatically Building](#automatically-building)
+    * [Manually Building](#manually-building)
     * [Running wasm-opt](#running-wasm-opt)
   * [Introducing WAjicUp](#introducing-wajicup)
   * [Creating your own WAJIC functions](#creating-your-own-wajic-functions)
@@ -34,7 +36,8 @@ The output can be loaded in the WAjic viewer (available [online](https://wajic.g
     * [Debugging](#debugging)
     * [Compiling and Linking Separately](#compiling-and-linking-separately)
     * [Manually Building System Libraries](#manually-building-system-libraries)
-    * [Experimental Compiling with WAjicUp](#experimental-compiling-with-wajicup)
+    * [Directly Compiling with WAjicUp](#directly-compiling-with-wajicup)
+    * [Using Symbolic Links](#using-symbolic-links)
   * [Missing Features](#missing-features)
   * [License](#license)
 
@@ -70,8 +73,26 @@ If you use Node only for this, just get the latest long-term-support executable.
 You can find the official Win64 EXE [here](https://nodejs.org/download/release/latest-dubnium/win-x64/node.exe).
 
 ## Building an Application
-Building can be done by manually calling Clang in the command line or by using a build system like GNU Make.
+Building can be done automatically or manually by calling Clang in the command line or by using a build system like GNU Make.
 
+### Automatically Building
+First, make sure clang, wasm-ld and wasm-opt exist in the same directory as wajicup.js.  
+See the section [Using Symbolic Links](#using-symbolic-links) for how to do this without fully copying these files.
+
+Then just run the following command to get a fully packaged, optimized and independent html file of the first sample:
+
+`node wajicup.js Samples/Basic.c Basic.html`
+
+At first, this only builds raw C/C++ applications without the C/C++ standard libraries or dynamic memory allocations.  
+To get support for these system libraries, just download the [pre-built system libraries and headers](https://github.com/schellingb/wajic/releases/tag/bin) and put it into the wajic directory.
+
+Now we can build the rest of the samples, for example the WebGL sample, with:
+
+`node wajicup.js Samples/WebGL.c WebGL.html`
+
+See the sections [Introducing WAjicUp](#introducing-wajicup) and [Directly Compiling with WAjicUp](#directly-compiling-with-wajicup) for details and how to output separate html/js/wasm files.
+
+### Manually Building
 For example, to build the basic sample, run this command to create Basic.wasm:
 
 `clang -I. -Os -target wasm32 -nostartfiles -nodefaultlibs -nostdinc -nostdinc++ -Wno-unused-command-line-argument -DNDEBUG -D__WAJIC__ -fvisibility=hidden -fno-rtti -fno-exceptions -fno-threadsafe-statics -Xlinker -strip-all -Xlinker -gc-sections -Xlinker -no-entry -Xlinker -allow-undefined -Xlinker -export=__wasm_call_ctors -Xlinker -export=main samples/Basic.c -o Basic.wasm`
@@ -130,18 +151,24 @@ embed both the WASM data and the JavaScript code inside it.
 
 Some option switches are also available:
 
- Name          | Explanation
----------------|-----------------
- `-no_minify`  | Don't minify JavaScript code
- `-no_log`     | Remove all output logging
- `-streaming`  | Enable [WASM streaming](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/instantiateStreaming) (needs web server support, new browser)
- `-rle`        | Use RLE compression when embedding the WASM file
- `-loadbar`    | Add a loading progress bar to the generated HTML
- `-node`       | Output JavaScript that runs in Node.js (CLI)
- `-embed N P`  | Embed data file with embed name N from path P (see [file embedding](#embedding-files))
- `-gzipreport` | Report the potential output size with gzip compression
- `-v`          | Be verbose about processed functions
- `-h`          | Show command line usage
+ Name           | Explanation
+----------------|-----------------
+ `-no_minify`   | Don't minify JavaScript code
+ `-no_log`      | Remove all output logging
+ `-streaming`   | Enable [WASM streaming](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WebAssembly/instantiateStreaming) (needs web server support, new browser)
+ `-rle`         | Use RLE compression when embedding the WASM file
+ `-loadbar`     | Add a loading progress bar to the generated HTML
+ `-node`        | Output JavaScript that runs in Node.js (CLI)
+ `-embed N P`   | Embed data file with embed name N from path P (see [file embedding](#embedding-files))
+ `-gzipreport`  | Report the potential output size with gzip compression
+ `-args`        | Enable C program arguments (argc/argv) that are passed to main (can be customized in the WASM loading html)
+ `-arg X`       | Passes X to the program arguments, can be specified multiple times (first arg must be the program name)
+ `-template H`  | Uses HTML template file H instead of generating a default file.
+ `-stacksize S` | Overrides the size of the stack from the WebAssembly default of just 64 kb
+ `-cc "X"`      | When [compiling directly with WAjicUp](#directly-compiling-with-wajicup), this passes argument X to the compiler
+ `-ld "Y"`      | When [compiling directly with WAjicUp](#directly-compiling-with-wajicup), this passes argument Y to the linker
+ `-v`           | Be verbose about processed functions
+ `-h`           | Show command line usage
 
 ## Creating your own WAJIC functions
 With the WAJIC macro you can declare a function callable from C/C++ with a JavaScript code body that can then access all kinds of web APIs:
@@ -248,7 +275,16 @@ You can embed binary files with WAjicUp and read them in your program. To embed 
 
 `node wajicup.js EmbedFile.wasm EmbedFile.wasm -embed MYFILE data.bin`
 
-And then in your program you can access the file contents:
+And then in your program you can use standard C functions to read embedded files:
+
+```C
+char buf[1024];
+FILE* f = fopen("MYFILE", "rb");
+int len = fread(buf, 1, 1024, f); // read the first 1024 bytes of the file
+fclose(f);
+```
+
+Alternatively you can access the file contents with the wajic file API:
 
 ```C
 #include <wajic_file.h>
@@ -256,15 +292,6 @@ unsigned int size = WaFileGetSize("MYFILE") // get the file size
 unsigned int read = WaFileRead("MYFILE", data, start, sizeof(data)); // read sizeof(data) bytes from file at offset start
 const char* file = (const char*)WaFileMallocRead("MYFILE", &size); // allocate memory and read the full file (optional start/offset)
 free(file); // free the memory allocated by WaFileMallocRead
-```
-
-Alternatively you can use some standard C functions to read embedded files:
-
-```C
-char buf[1024];
-FILE* f = fopen("MYFILE", "rb");
-int len = fread(buf, 1, 1024, f); // read the first 1024 bytes of the file
-fclose(f);
 ```
 
 It is also possible to embed all files in a directory.
@@ -284,7 +311,7 @@ To do so, you have to pass a string of the name of the callback function like th
 
 // This function is called when the HTTP request finishes (or has an error)
 WA_EXPORT(FinishCallback) void FinishCallback(int status, char* data, unsigned int length, void* userdata)
-{ printf("Received response - status: %d - length: %u - data: '%.4s...' - userdata: %p\n", status, length, data, userdata); }
+{ printf("Got response - status: %d - length: %u - data: '%.4s...' - userdata: %p\n", status, length, data, userdata); }
 
 // This function is called periodically with download progress updates until download is complete
 WA_EXPORT(ProgressCallback) void ProgressCallback(unsigned int loaded, unsigned int total, void* userdata)
@@ -414,10 +441,10 @@ Then you can build the system libraries (contains libc + libcxx + malloc) with t
 
 `make -j 8 -f <path-to-wajic.mk> <path-to-wajic-root>/system/system.bc`
 
-### Experimental Compiling with WAjicUp
+### Directly Compiling with WAjicUp
 WAjicUp actually accepts c/cpp files as input.
 To use it, the executables of clang, wasm-ld and wasm-opt need to be in the same directory as wajicup.js.
-It is possible to create symbolic links instead of copying them.
+See the section [Using Symbolic Links](#using-symbolic-links) for means to avoid copying these files.
 
 Then it's as easy as running it like this:
 
@@ -428,6 +455,36 @@ To pass additional command line options (like -I or -D) to the compiler, you can
 And similarly with one or more `-ld` switches options can be passed to the linker.
 When passing the special `-cc -g` switch, code will be built in debug mode with full DWARF debug information included.
 This makes it possible to debug through the native code and have breakpoints in the actual C/CPP files.
+
+It is also possible to output a single c/cpp file into a object .o file. This later can then be linked to a .wasm with `-ld obj.o`.  
+Further more, one or more source files can be compiled into a single bitcode archive .bc file. Just like .o this can be linked.  
+Example:
+
+```sh
+node wajicup.js big.c big.o
+node wajicup.js multiple.c source.c files.c multi.bc
+node wajicup.js main.cpp -ld big.o -ld multi.bc combined.html
+```
+
+### Using Symbolic Links
+To compile directly with WAjicUp, the executables clang, wasm-ld and wasm-opt need to be in the same directory as wajicup.js.
+If you have them somewhere else on your system then it's easiest to use symbolic links.
+
+On Windows, you can accomplish this with (replace 'D:\dev\wasm\*' with your paths):
+
+```
+mklink "<path-to-wajic-root>\clang.exe" "D:\dev\wasm\llvm\clang.exe"
+mklink "<path-to-wajic-root>\wasm-ld.exe" "D:\dev\wasm\llvm\wasm-ld.exe"
+mklink "<path-to-wajic-root>\wasm-opt.exe" "D:\dev\wasm\wasm-opt.exe"
+```
+
+On Linux, this can be done by running (replace '/usr/bin/' with your paths):
+
+```
+ln -s /usr/bin/clang <path-to-wajic-root>/clang
+ln -s /usr/bin/wasm-ld <path-to-wajic-root>/wasm-ld
+ln -s /usr/bin/wasm-opt <path-to-wajic-root>/wasm-opt
+```
 
 ## Missing Features
 At this point in time, WAjic has no support for the following features:
