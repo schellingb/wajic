@@ -1,6 +1,6 @@
 #
 #  WAjic - WebAssembly JavaScript Interface Creator
-#  Copyright (C) 2020-2021 Bernhard Schelling
+#  Copyright (C) 2020-2022 Bernhard Schelling
 #
 #  This software is provided 'as-is', without any express or implied
 #  warranty.  In no event will the authors be held liable for any damages
@@ -24,7 +24,10 @@ WAJIC_ROOT    := $(dir $(THIS_MAKEFILE))
 ISWIN         := $(findstring :,$(firstword $(subst \, ,$(subst /, ,$(abspath .)))))
 PIPETONULL    := $(if $(ISWIN),>nul 2>nul,>/dev/null 2>/dev/null)
 -include $(WAJIC_ROOT)LocalConfig.mk
-ifeq ($(and $(LLVM_ROOT)),)
+ifneq ($(if $(LLVM_ROOT),,$(wildcard ./clang.exe)),)
+  LLVM_ROOT = .
+endif
+ifeq ($(LLVM_ROOT),)
   $(info )
   $(info Please create the file $(WAJIC_ROOT)LocalConfig.mk with at least the following definition:)
   $(info )
@@ -93,7 +96,7 @@ OUTBASE := $(OUTDIR)/$(if $(SRC),$(basename $(notdir $(firstword $(SRC)))),outpu
 
 # Compute tool paths
 ifeq ($(wildcard $(subst $(strip ) ,\ ,$(LLVM_ROOT))/clang*),)
-  $(error clang executables not found in set LLVM_ROOT path ($(LLVM_ROOT)). Set custom path in this makefile with LLVM_ROOT = $(if $(ISWIN),d:)/path/to/clang)
+  $(error clang executables not found in set LLVM_ROOT path ($(LLVM_ROOT)). Set custom path in $(WAJIC_ROOT)LocalConfig.mk with LLVM_ROOT = $(if $(ISWIN),d:)/path/to/clang)
 endif
 ifeq ($(wildcard $(subst $(strip ) ,\ ,$(WASMOPT))),)
   undefine WASMOPT
@@ -149,6 +152,7 @@ SYS_IGNORE += fabs.c fabsf.c fabsl.c floor.c floorf.c floorl.c pow.c powf.c powl
 SYS_IGNORE += log.c log_data.c log_small.c logf.c logf_data.c logl.c log10.c log10f.c log10l.c log1p.c log1pf.c log1pl.c log2.c log2_data.c log2_small.c log2f.c log2f_data.c log2l.c
 SYS_IGNORE += syscall.c wordexp.c initgroups.c getgrouplist.c popen.c _exit.c alarm.c usleep.c faccessat.c iconv.c
 SYS_IGNORE += gcc_personality_v0.c # 1.39.20 and newer only
+SYS_IGNORE += progname.c # 3.1.3 and newer only
 
 SYS_SOURCES := $(filter-out $(SYS_IGNORE:%=\%/%),$(wildcard $(addprefix $(SYSTEM_ROOT)/lib/,$(SYS_ADDS) $(SYS_MUSL:%=libc/musl/src/%/*.c))))
 SYS_SOURCES := $(subst $(SYSTEM_ROOT)/lib/,,$(SYS_SOURCES))
@@ -177,6 +181,7 @@ SYS_CFLAGS += -Wno-unused-result -Wno-pointer-sign -Wno-implicit-function-declar
 SYS_CFLAGS += -isystem$(SYSTEM_ROOT)/lib/libc/musl/src/internal
 
 SYS_MUSLFLAGS := -isystem$(SYSTEM_ROOT)/lib/libc/musl/src/include
+SYS_MUSLFLAGS += $(if $(wildcard $(SYSTEM_ROOT)/lib/pthread/threading_internal.h),-I$(SYSTEM_ROOT)/lib/pthread) # for 3.0.1 and newer
 
 SYS_MUSL_OBJS := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst   %.c,%.o,$(filter libc/musl/%,$(SYS_SOURCES)) $(filter pthread/%,$(SYS_SOURCES)))))
 SYS_CC_OBJS   := $(addprefix $(SYS_TEMP)/,$(subst /,!,$(patsubst   %.c,%.o,$(filter   %.c,$(filter-out pthread/%,$(filter-out libc/musl/%,$(SYS_SOURCES)))))))
