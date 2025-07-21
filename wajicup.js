@@ -725,8 +725,9 @@ function GenerateJsBody(mods, libs, import_memory_pages, p)
 			body += '	MU32[(argv + 4)>>2] = 0;' + "\n\n";
 		}
 
-		if (exports.main) body += '	ASM.main(argc, argv);' + "\n";
-		if (exports.__main_argc_argv) body += '	ASM.__main_argc_argv(argc, argv);' + "\n";
+		const run_prefix = (p.node ? '	process.exitCode = ASM.' : '	ASM.');
+		if (exports.main) body += run_prefix + 'main(argc, argv);' + "\n";
+		if (exports.__main_argc_argv) body += run_prefix + '__main_argc_argv(argc, argv);' + "\n";
 		body += "\n";
 	}
 	if (((exports.main || exports.__main_argc_argv) && !exports.malloc) || exports.__original_main || exports.__main_void)
